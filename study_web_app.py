@@ -3,23 +3,72 @@ import pandas as pd
 import random
 import os
 
-# 페이지 설정
-st.set_page_config(page_title="굿잡님의 인출 훈련기", layout="centered")
+# 페이지 설정 (전체 너비 사용)
+st.set_page_config(page_title="인출기", layout="wide")
 
-# CSS로 배경색 및 폰트 크기 조절 (태블릿 가독성 최적화)
+# 태블릿 최적화 초대형 CSS (제목 제거 및 여백 조정)
 st.markdown("""
     <style>
+    /* 전체 배경 및 기본 글자색 */
     .stApp { background-color: black; color: white; }
-    .stButton>button { width: 100%; height: 3em; font-size: 1.5em !important; }
-    h1, h2, h3 { color: white !important; }
-    .question-text { font-size: 2.5em; font-weight: bold; color: #f1c40f; text-align: center; margin: 50px 0; }
-    .answer-text { font-size: 2.5em; font-weight: bold; color: #2ecc71; text-align: center; margin: 50px 0; }
+    
+    /* 상단 기본 여백 제거 */
+    .block-container { padding-top: 2rem !important; }
+    
+    /* 회독 정보/상태 메시지 크기 (상단에 위치) */
+    .info-text { 
+        font-size: 2.8rem !important; 
+        color: #aaaaaa; 
+        text-align: center; 
+        margin-bottom: 20px;
+        font-weight: bold;
+    }
+    
+    /* 질문 및 정답 텍스트 (화면 중앙에 크게) */
+    .question-text { 
+        font-size: 5.5rem !important; 
+        font-weight: bold; 
+        color: #f1c40f; 
+        text-align: center; 
+        margin: 100px 0; 
+        line-height: 1.3;
+        word-break: keep-all;
+    }
+    .answer-text { 
+        font-size: 5.5rem !important; 
+        font-weight: bold; 
+        color: #2ecc71; 
+        text-align: center; 
+        margin: 100px 0; 
+        line-height: 1.3;
+        word-break: keep-all;
+    }
+
+    /* 버튼 스타일 (터치 최적화 거대 버튼) */
+    div.stButton > button {
+        width: 100%;
+        height: 180px !important;  
+        font-size: 4rem !important; 
+        font-weight: bold !important;
+        border-radius: 40px !important; 
+        background-color: #34495e;
+        color: white;
+        border: 3px solid #555;
+    }
+    
+    /* 맞음/틀림 버튼 색상 및 위치 조정 */
+    div.stButton > button[kind="primary"] { background-color: #27ae60; border: none; }
+    
+    /* 모바일/태블릿용 하단 여백 추가 */
+    footer {display: none;}
+    #MainMenu {display: none;}
     </style>
     """, unsafe_allow_html=True)
 
-# 데이터 로드 및 세션 상태 초기화
+# 엑셀 파일 경로
 EXCEL_FILE = "study_list.xlsx"
 
+# 세션 상태 초기화
 if 'state' not in st.session_state:
     st.session_state.state = "IDLE"
     st.session_state.current_index = None
@@ -28,6 +77,7 @@ if 'state' not in st.session_state:
 def load_data():
     if os.path.exists(EXCEL_FILE):
         df = pd.read_excel(EXCEL_FILE)
+        # C(맞음), D(틀림) 열 확보
         while len(df.columns) < 4:
             df[f"열_{len(df.columns)}"] = 0
         df.iloc[:, 2] = pd.to_numeric(df.iloc[:, 2], errors='coerce').fillna(0).astype(int)
@@ -38,38 +88,41 @@ def load_data():
 df = load_data()
 
 def get_next_question():
+    # C열+D열 합산으로 회독 계산
     total_counts = df.iloc[:, 2] + df.iloc[:, 3]
     pending_indices = df[total_counts < st.session_state.target_round].index.tolist()
     
     if not pending_indices:
         st.session_state.target_round += 10
         pending_indices = df.index.tolist()
-        st.warning(f"🎉 모든 문제 완료! 다음 목표 {st.session_state.target_round}회로 넘어갑니다.")
-
+    
+    # 오답(D열) 가중치 출제 로직 유지
     subset_df = df.loc[pending_indices]
     weights = [(fail * 3) + 1 for fail in subset_df.iloc[:, 3]]
     return random.choices(pending_indices, weights=weights, k=1)[0]
 
-# UI 구성
-st.title("🛡️ 고난도 인출 훈련기")
+# --- 화면 구성 시작 ---
 
 if df is not None:
     if st.session_state.state == "IDLE":
-        if st.button("훈련 시작 (Space/Click)"):
+        st.markdown(f'<p class="question-text">준비 완료!</p>', unsafe_allow_html=True)
+        st.markdown(f'<p class="info-text">목표: 전 문제 {st.session_state.target_round}회 복습</p>', unsafe_allow_html=True)
+        if st.button("훈련 시작 하기"):
             st.session_state.current_index = get_next_question()
             st.session_state.state = "QUESTION"
             st.rerun()
 
     elif st.session_state.state == "QUESTION":
         curr_total = df.iloc[st.session_state.current_index, 2] + df.iloc[st.session_state.current_index, 3]
-        st.subheader(f"회독 정보: {(curr_total % 10) + 1} / 10회")
+        st.markdown(f'<p class="info-text">이 문제 누적 복습: {(curr_total % 10) + 1} / 10회</p>', unsafe_allow_html=True)
         st.markdown(f'<p class="question-text">Q. {df.iloc[st.session_state.current_index, 0]}</p>', unsafe_allow_html=True)
         
-        if st.button("머릿속으로 정답 인출 후 클릭!"):
+        if st.button("정답 확인하기"):
             st.session_state.state = "ANSWER"
             st.rerun()
 
     elif st.session_state.state == "ANSWER":
+        st.markdown(f'<p class="info-text">정답을 확인하세요!</p>', unsafe_allow_html=True)
         st.markdown(f'<p class="answer-text">A. {df.iloc[st.session_state.current_index, 1]}</p>', unsafe_allow_html=True)
         
         col1, col2 = st.columns(2)
@@ -88,4 +141,4 @@ if df is not None:
                 st.session_state.state = "QUESTION"
                 st.rerun()
 else:
-    st.error("엑셀 파일을 찾을 수 없습니다.")
+    st.error("엑셀 파일(study_list.xlsx)이 깃허브에 없습니다.")
