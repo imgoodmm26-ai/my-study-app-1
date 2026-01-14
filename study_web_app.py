@@ -1,72 +1,31 @@
 import streamlit as st
+from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import random
-import os
 
-# 페이지 설정 (전체 너비 사용)
+# 페이지 설정
 st.set_page_config(page_title="인출기", layout="wide")
 
-# 태블릿 최적화 초대형 CSS (제목 제거 및 여백 조정)
+# 태블릿 최적화 CSS (오답 분석표 디자인 추가)
 st.markdown("""
     <style>
-    /* 전체 배경 및 기본 글자색 */
     .stApp { background-color: black; color: white; }
-    
-    /* 상단 기본 여백 제거 */
     .block-container { padding-top: 2rem !important; }
-    
-    /* 회독 정보/상태 메시지 크기 (상단에 위치) */
-    .info-text { 
-        font-size: 2.8rem !important; 
-        color: #aaaaaa; 
-        text-align: center; 
-        margin-bottom: 20px;
-        font-weight: bold;
-    }
-    
-    /* 질문 및 정답 텍스트 (화면 중앙에 크게) */
-    .question-text { 
-        font-size: 5.5rem !important; 
-        font-weight: bold; 
-        color: #f1c40f; 
-        text-align: center; 
-        margin: 100px 0; 
-        line-height: 1.3;
-        word-break: keep-all;
-    }
-    .answer-text { 
-        font-size: 5.5rem !important; 
-        font-weight: bold; 
-        color: #2ecc71; 
-        text-align: center; 
-        margin: 100px 0; 
-        line-height: 1.3;
-        word-break: keep-all;
-    }
-
-    /* 버튼 스타일 (터치 최적화 거대 버튼) */
-    div.stButton > button {
-        width: 100%;
-        height: 180px !important;  
-        font-size: 4rem !important; 
-        font-weight: bold !important;
-        border-radius: 40px !important; 
-        background-color: #34495e;
-        color: white;
-        border: 3px solid #555;
-    }
-    
-    /* 맞음/틀림 버튼 색상 및 위치 조정 */
+    .info-text { font-size: 2.5rem !important; color: #aaaaaa; text-align: center; margin-bottom: 10px; font-weight: bold; }
+    .error-count-text { font-size: 2rem !important; color: #ff4b4b; text-align: center; margin-bottom: 20px; }
+    .question-text { font-size: 5rem !important; font-weight: bold; color: #f1c40f; text-align: center; margin: 80px 0; line-height: 1.3; word-break: keep-all; }
+    .answer-text { font-size: 5rem !important; font-weight: bold; color: #2ecc71; text-align: center; margin: 80px 0; line-height: 1.3; word-break: keep-all; }
+    div.stButton > button { width: 100%; height: 160px !important; font-size: 3.5rem !important; font-weight: bold !important; border-radius: 40px !important; background-color: #34495e; color: white; border: 3px solid #555; }
     div.stButton > button[kind="primary"] { background-color: #27ae60; border: none; }
-    
-    /* 모바일/태블릿용 하단 여백 추가 */
     footer {display: none;}
-    #MainMenu {display: none;}
+    
+    /* 오답 분석표 스타일 */
+    .stDataFrame { background-color: white; border-radius: 10px; margin-top: 30px; }
     </style>
     """, unsafe_allow_html=True)
 
-# 엑셀 파일 경로
-EXCEL_FILE = "study_list.xlsx"
+# 구글 시트 연결 설정
+conn = st.connection("gsheets", type=GSheetsConnection)
 
 # 세션 상태 초기화
 if 'state' not in st.session_state:
@@ -74,29 +33,19 @@ if 'state' not in st.session_state:
     st.session_state.current_index = None
     st.session_state.target_round = 10
 
+# 데이터 로드
 def load_data():
-    if os.path.exists(EXCEL_FILE):
-        df = pd.read_excel(EXCEL_FILE)
-        # C(맞음), D(틀림) 열 확보
-        while len(df.columns) < 4:
-            df[f"열_{len(df.columns)}"] = 0
-        df.iloc[:, 2] = pd.to_numeric(df.iloc[:, 2], errors='coerce').fillna(0).astype(int)
-        df.iloc[:, 3] = pd.to_numeric(df.iloc[:, 3], errors='coerce').fillna(0).astype(int)
-        return df
-    return None
+    return conn.read(spreadsheet=st.secrets["gsheets_url"], usecols=[0,1,2,3])
 
 df = load_data()
 
 def get_next_question():
-    # C열+D열 합산으로 회독 계산
     total_counts = df.iloc[:, 2] + df.iloc[:, 3]
     pending_indices = df[total_counts < st.session_state.target_round].index.tolist()
-    
     if not pending_indices:
         st.session_state.target_round += 10
         pending_indices = df.index.tolist()
     
-    # 오답(D열) 가중치 출제 로직 유지
     subset_df = df.loc[pending_indices]
     weights = [(fail * 3) + 1 for fail in subset_df.iloc[:, 3]]
     return random.choices(pending_indices, weights=weights, k=1)[0]
@@ -104,54 +53,53 @@ def get_next_question():
 # --- 화면 구성 시작 ---
 
 if df is not None:
+    # 1. 메인 학습 영역
     if st.session_state.state == "IDLE":
-        st.markdown(f'<p class="question-text">준비 완료!</p>', unsafe_allow_html=True)
-        st.markdown(f'<p class="info-text">목표: 전 문제 {st.session_state.target_round}회 복습</p>', unsafe_allow_html=True)
+        st.markdown('<p class="question-text">준비 완료!</p>', unsafe_allow_html=True)
         if st.button("훈련 시작 하기"):
             st.session_state.current_index = get_next_question()
             st.session_state.state = "QUESTION"
             st.rerun()
 
     elif st.session_state.state == "QUESTION":
-        curr_total = df.iloc[st.session_state.current_index, 2] + df.iloc[st.session_state.current_index, 3]
-        st.markdown(f'<p class="info-text">이 문제 누적 복습: {(curr_total % 10) + 1} / 10회</p>', unsafe_allow_html=True)
-        st.markdown(f'<p class="question-text">Q. {df.iloc[st.session_state.current_index, 0]}</p>', unsafe_allow_html=True)
-        
+        row = df.iloc[st.session_state.current_index]
+        st.markdown(f'<p class="info-text">복습 횟수: {int((row[2]+row[3]) % 10) + 1}/10회</p>', unsafe_allow_html=True)
+        st.markdown(f'<p class="error-count-text">⚠️ 이 문제 누적 오답: {int(row[3])}회</p>', unsafe_allow_html=True)
+        st.markdown(f'<p class="question-text">Q. {row[0]}</p>', unsafe_allow_html=True)
         if st.button("정답 확인하기"):
             st.session_state.state = "ANSWER"
             st.rerun()
 
     elif st.session_state.state == "ANSWER":
-        st.markdown(f'<p class="info-text">정답을 확인하세요!</p>', unsafe_allow_html=True)
-        st.markdown(f'<p class="answer-text">A. {df.iloc[st.session_state.current_index, 1]}</p>', unsafe_allow_html=True)
-        
+        row = df.iloc[st.session_state.current_index]
+        st.markdown(f'<p class="answer-text">A. {row[1]}</p>', unsafe_allow_html=True)
         col1, col2 = st.columns(2)
         with col1:
             if st.button("맞음 (O)"):
                 df.iloc[st.session_state.current_index, 2] += 1
-                df.to_excel(EXCEL_FILE, index=False)
+                conn.update(spreadsheet=st.secrets["gsheets_url"], data=df)
                 st.session_state.current_index = get_next_question()
                 st.session_state.state = "QUESTION"
                 st.rerun()
         with col2:
             if st.button("틀림 (X)"):
                 df.iloc[st.session_state.current_index, 3] += 1
-                df.to_excel(EXCEL_FILE, index=False)
+                conn.update(spreadsheet=st.secrets["gsheets_url"], data=df)
                 st.session_state.current_index = get_next_question()
                 st.session_state.state = "QUESTION"
                 st.rerun()
+
+    # 2. 하단 오답 분석 영역 (굿잡님의 요청 사항)
+    st.markdown("---")
+    st.subheader("⚠️ 취약 문제 Top 10 (많이 틀린 순)")
+    
+    # 엑셀의 A열(질문)과 D열(틀림)만 추출하여 정렬
+    # (제목은 시트의 첫 번째 줄에 따라 '질문', '틀림' 등으로 자동 인식됩니다)
+    error_analysis = df.copy()
+    error_analysis.columns = ['질문', '정답', '맞음', '틀림'] # 열 이름 강제 지정
+    top_errors = error_analysis[['질문', '틀림']].sort_values(by='틀림', ascending=False).head(10)
+    
+    st.table(top_errors) # 태블릿에서 보기 편하도록 깔끔한 표 형태로 출력
+
 else:
-    st.error("엑셀 파일(study_list.xlsx)이 깃허브에 없습니다.")
-# --- 코드 맨 아랫부분에 추가 ---
-st.markdown("---") # 구분선
-st.subheader("📊 오늘의 학습 현황")
-
-# 전체 맞은 횟수와 틀린 횟수 합계 계산
-total_ok = df.iloc[:, 2].sum()
-total_no = df.iloc[:, 3].sum()
-
-# 예쁘게 보여주기 위한 3칸 레이아웃
-col_a, col_b, col_c = st.columns(3)
-col_a.metric("전체 맞음 (O)", f"{total_ok}개", delta=None)
-col_b.metric("전체 틀림 (X)", f"{total_no}개", delta=None, delta_color="inverse")
-col_c.metric("총 학습 횟수", f"{total_ok + total_no}회")
+    st.error("데이터를 불러올 수 없습니다.")
