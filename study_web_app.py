@@ -3,10 +3,8 @@ from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import random
 
-# 페이지 설정
 st.set_page_config(page_title="감평 인출기", layout="wide")
 
-# 태블릿 전용 스타일 (질문/정답 강조)
 st.markdown("""
     <style>
     .stApp { background-color: black; color: white; }
@@ -28,18 +26,18 @@ if 'state' not in st.session_state:
     st.session_state.current_index = None
     st.session_state.target_round = 10
 
-# 데이터 로드 (시트의 각 탭을 합쳐서 가져오기)
 @st.cache_data(ttl=5)
 def load_all_data(selected_list):
     all_data = []
     for sub in selected_list:
         try:
-            # 탭 이름을 'worksheet'로 지정하여 읽기
-            tmp_df = conn.read(spreadsheet=st.secrets["gsheets_url"], worksheet=sub, usecols=[0,1,2,3])
-            tmp_df.columns = ['질문', '정답', '정답횟수', '오답횟수']
-            tmp_df['과목명'] = sub
-            all_data.append(tmp_df)
-        except:
+            # 탭 이름의 앞뒤 공백을 제거하고 읽어오도록 시도
+            tmp_df = conn.read(spreadsheet=st.secrets["gsheets_url"], worksheet=sub.strip(), usecols=[0,1,2,3])
+            if not tmp_df.empty:
+                tmp_df.columns = ['질문', '정답', '정답횟수', '오답횟수']
+                tmp_df['과목명'] = sub.strip()
+                all_data.append(tmp_df)
+        except Exception as e:
             continue
     if all_data:
         combined = pd.concat(all_data, ignore_index=True)
@@ -48,7 +46,6 @@ def load_all_data(selected_list):
         return combined
     return pd.DataFrame()
 
-# --- 사이드바: 탭 이름과 동일하게 과목 리스트 구성 ---
 st.sidebar.markdown("# 📚 과목 선택")
 subjects = ["회계학", "경제학", "민법", "감관법", "부동산학원론"]
 selected_subs = st.sidebar.multiselect("학습할 과목을 선택하세요", options=subjects, default=subjects)
@@ -67,9 +64,8 @@ def get_next_question():
     weights = [(fail * 3) + 1 for fail in subset['오답횟수']]
     return random.choices(pending_indices, weights=weights, k=1)[0]
 
-# --- 학습 화면 ---
 if full_df.empty:
-    st.warning("선택된 과목 탭에 문제가 없거나 탭 이름이 시트와 다릅니다.")
+    st.warning("⚠️ 시트에서 데이터를 찾을 수 없습니다. 탭 이름(공백 주의)과 내용을 확인해주세요.")
 else:
     if st.session_state.state == "IDLE":
         st.markdown('<p class="question-text">인출 준비 완료!</p>', unsafe_allow_html=True)
@@ -97,11 +93,9 @@ else:
             if st.button("맞음 (O)"):
                 sub_name = item["과목명"]
                 sub_df = conn.read(spreadsheet=st.secrets["gsheets_url"], worksheet=sub_name)
-                # 시트에서 질문이 일치하는 행의 '정답횟수' 열(C열, 인덱스 2) 업데이트
                 row_idx = sub_df[sub_df.iloc[:, 0] == item["질문"]].index[0]
                 sub_df.iloc[row_idx, 2] = int(sub_df.iloc[row_idx, 2]) + 1
                 conn.update(spreadsheet=st.secrets["gsheets_url"], worksheet=sub_name, data=sub_df)
-                
                 st.session_state.current_index = get_next_question()
                 st.session_state.state = "QUESTION"
                 st.cache_data.clear()
@@ -110,11 +104,9 @@ else:
             if st.button("틀림 (X)"):
                 sub_name = item["과목명"]
                 sub_df = conn.read(spreadsheet=st.secrets["gsheets_url"], worksheet=sub_name)
-                # 시트에서 질문이 일치하는 행의 '오답횟수' 열(D열, 인덱스 3) 업데이트
                 row_idx = sub_df[sub_df.iloc[:, 0] == item["질문"]].index[0]
                 sub_df.iloc[row_idx, 3] = int(sub_df.iloc[row_idx, 3]) + 1
                 conn.update(spreadsheet=st.secrets["gsheets_url"], worksheet=sub_name, data=sub_df)
-                
                 st.session_state.current_index = get_next_question()
                 st.session_state.state = "QUESTION"
                 st.cache_data.clear()
