@@ -142,3 +142,16 @@ if df is not None:
                 st.rerun()
 else:
     st.error("엑셀 파일(study_list.xlsx)이 깃허브에 없습니다.")
+# --- 코드 맨 아랫부분에 추가 ---
+st.markdown("---") # 구분선
+st.subheader("📊 오늘의 학습 현황")
+
+# 전체 맞은 횟수와 틀린 횟수 합계 계산
+total_ok = df.iloc[:, 2].sum()
+total_no = df.iloc[:, 3].sum()
+
+# 예쁘게 보여주기 위한 3칸 레이아웃
+col_a, col_b, col_c = st.columns(3)
+col_a.metric("전체 맞음 (O)", f"{total_ok}개", delta=None)
+col_b.metric("전체 틀림 (X)", f"{total_no}개", delta=None, delta_color="inverse")
+col_c.metric("총 학습 횟수", f"{total_ok + total_no}회")
