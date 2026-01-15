@@ -14,40 +14,44 @@ if 'state' not in st.session_state:
 if 'current_index' not in st.session_state:
     st.session_state.current_index = None
 
-# 3. 디자인 설정 (굿잡님 스타일)
+# 3. 디자인 설정 (디자인은 그대로 유지)
 st.markdown("""
     <style>
     .stApp { background-color: black; color: white; }
-    .question-text { font-size: 4.3rem !important; font-weight: bold; color: #f1c40f; text-align: center; margin: 40px 0; }
-    .answer-text { font-size: 4.3rem !important; font-weight: bold; color: #2ecc71; text-align: center; margin: 40px 0; }
-    div.stButton > button { width: 100%; height: 140px !important; font-size: 2.8rem !important; border-radius: 40px !important; }
+    .info-text { font-size: 1.8rem !important; color: #aaaaaa; font-weight: bold; text-align: center; }
+    .question-text { font-size: 4.3rem !important; font-weight: bold; color: #f1c40f; line-height: 1.4; text-align: center; margin: 40px 0; word-break: keep-all; }
+    .answer-text { font-size: 4.3rem !important; font-weight: bold; color: #2ecc71; line-height: 1.4; text-align: center; margin: 40px 0; word-break: keep-all; }
+    div.stButton > button { width: 100%; height: 140px !important; font-size: 2.8rem !important; border-radius: 40px !important; background-color: #34495e; color: white; }
     </style>
     """, unsafe_allow_html=True)
 
-# 4. 데이터 로드 (캐시 문제 해결을 위해 ttl=0 설정)
+# 4. 데이터 로드 로직 (강화된 버전)
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-@st.cache_data(ttl=0) # 캐시를 저장하지 않고 매번 새로 불러옵니다.
+@st.cache_data(ttl=1) # 문제를 고치기 위해 TTL을 1초로 줄여 즉시 반영되게 합니다.
 def load_data():
     try:
         url = st.secrets["gsheets_url"].strip()
-        # 시트 이름 '시트1'을 명시적으로 지정하여 정확도를 높입니다.
-        df = conn.read(spreadsheet=url, worksheet="시트1", usecols=[0, 1])
+        # 시트를 읽어온 뒤 데이터가 있는지 확인
+        df = conn.read(spreadsheet=url, worksheet=0) 
         if df is not None and not df.empty:
+            df = df.iloc[:, :2] # 첫 2개 컬럼만 선택
             df.columns = ['질문', '정답']
             return df
-        return None
+        return pd.DataFrame(columns=['질문', '정답'])
     except Exception as e:
-        return None
+        return pd.DataFrame(columns=['질문', '정답'])
 
 df = load_data()
 
-# --- 5. 화면 구성 및 에러 방지 로직 ---
-if df is not None and len(df) > 0:
+# --- 5. 화면 구성 (ValueError 방지 핵심 로직) ---
+if not df.empty: # 데이터가 1개 이상 있을 때만 시작
+    for _ in range(4): st.write("")
     _, col2, _ = st.columns([1, 10, 1])
+
     with col2:
         if st.session_state.state == "IDLE":
-            st.markdown('<p class="question-text">경제학 인출 훈련 준비 완료</p>', unsafe_allow_html=True)
+            st.markdown('<p class="question-text">준비되셨나요, 굿잡님?<br>인출 훈련 시작!</p>', unsafe_allow_html=True)
             if st.button("훈련 시작 하기", type="primary"):
                 st.session_state.current_index = random.randint(0, len(df)-1)
                 st.session_state.state = "QUESTION"
@@ -55,6 +59,7 @@ if df is not None and len(df) > 0:
 
         elif st.session_state.state == "QUESTION":
             row = df.iloc[st.session_state.current_index]
+            st.markdown('<p class="info-text">지금 바로 떠올려보세요!</p>', unsafe_allow_html=True)
             st.markdown(f'<p class="question-text">Q. {row["질문"]}</p>', unsafe_allow_html=True)
             if st.button("정답 확인하기"):
                 st.session_state.state = "ANSWER"
@@ -74,4 +79,7 @@ if df is not None and len(df) > 0:
                     st.session_state.state = "QUESTION"
                     st.rerun()
 else:
-    st.error("❗ 구글 시트 데이터를 읽지 못했습니다. 앱을 새로고침(F5)하거나 시트 공유 설정을 확인해주세요.")
+    st.error("❗ 구글 시트에서 데이터를 불러오지 못했습니다. 시트 내용을 다시 확인해 주세요.")
+    if st.button("데이터 다시 불러오기"):
+        st.cache_data.clear() # 캐시 강제 삭제
+        st.rerun()
