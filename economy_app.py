@@ -1,63 +1,112 @@
 import streamlit as st
+from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import random
 
-# 1. 경제학 핵심 문제 데이터 (빈출 및 출제 예상 내용)
-def load_economy_data():
-    data = [
-        {
-            "difficulty": "중",
-            "question": "IS 곡선이 우하향할 때, 확장적 재정정책은 IS 곡선을 어느 방향으로 이동시키는가?",
-            "answer": "오른쪽(우측)으로 이동시킵니다. 정부지출 증가나 조세 감면은 모든 이자율 수준에서 총수요를 증가시키기 때문입니다."
-        },
-        {
-            "difficulty": "상",
-            "question": "투자가 이자율 변화에 전혀 반응하지 않는 경우(투자 탄력성=0), IS 곡선의 형태와 정책 효과는?",
-            "answer": "IS 곡선은 **수직선**이 됩니다. 이 경우 재정정책의 효과는 극대화되지만, 통화정책은 효과가 없습니다."
-        },
-        {
-            "difficulty": "중",
-            "question": "LM 곡선이 우상향할 때, 중앙은행의 국공채 매입은 LM 곡선을 어느 방향으로 이동시키는가?",
-            "answer": "오른쪽(하방)으로 이동시킵니다. 통화량 공급이 늘어나면 화폐시장의 균형 이자율이 하락하기 때문입니다."
-        },
-        {
-            "difficulty": "최상",
-            "question": "유동성 함정(Liquidity Trap) 구간에서 LM 곡선의 형태와 통화정책의 유효성은?",
-            "answer": "LM 곡선은 **수평선**이 됩니다. 이 구간에서는 통화량을 아무리 늘려도 이자율이 더 이상 떨어지지 않아 통화정책이 무력해집니다."
-        },
-        {
-            "difficulty": "하",
-            "question": "고전학파의 '세이의 법칙(Say's Law)'을 한 문장으로 정의하면?",
-            "answer": "'공급은 스스로 수요를 창출한다'는 원리로, 생산물 시장의 초과공급이 발생하지 않는다고 봅니다."
-        }
-    ]
-    return pd.DataFrame(data)
+# 1. 페이지 설정
+st.set_page_config(page_title="감평사 인출 훈련기", layout="wide")
 
-# 2. 세션 상태 초기화 (문제 섞기 및 인덱스 관리)
-if 'db' not in st.session_state:
-    st.session_state.db = load_economy_data()
-if 'idx' not in st.session_state:
-    st.session_state.idx = random.randint(0, len(st.session_state.db) - 1)
+# 2. 세션 상태 초기화
+if 'session_scores' not in st.session_state:
+    st.session_state.session_scores = {}
+if 'state' not in st.session_state:
+    st.session_state.state = "IDLE"
+if 'current_index' not in st.session_state:
+    st.session_state.current_index = None
 
-# 3. 화면 UI 구성 (타이틀 제거 및 플래시카드 방식)
-df = st.session_state.db
-current_item = df.iloc[st.session_state.idx]
+# 3. 디자인 설정 (검은색 배경 및 대형 텍스트)
+st.markdown("""
+    <style>
+    .stApp { background-color: black; color: white; }
+    .info-text { font-size: 1.8rem !important; color: #aaaaaa; font-weight: bold; text-align: center; }
+    .session-text { font-size: 1.5rem !important; color: #3498db; font-weight: bold; margin-bottom: 20px; text-align: center; }
+    .question-text { font-size: 4.3rem !important; font-weight: bold; color: #f1c40f; line-height: 1.4; text-align: center; margin: 40px 0; word-break: keep-all; }
+    .answer-text { font-size: 4.3rem !important; font-weight: bold; color: #2ecc71; line-height: 1.4; text-align: center; margin: 40px 0; word-break: keep-all; }
+    
+    div.stButton > button { 
+        width: 100%; 
+        height: 120px !important; 
+        font-size: 2.5rem !important; 
+        font-weight: bold !important; 
+        border-radius: 40px !important; 
+        background-color: #34495e; 
+        color: white; 
+        border: 3px solid #555; 
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
-# --- 문제 표시 영역 ---
-st.write(f"**[난이도: {current_item['difficulty']}]**") # 난이도 표시
+# 4. 데이터 로드 (질문, 정답 2개 컬럼 사용)
+conn = st.connection("gsheets", type=GSheetsConnection)
 
-# 질문을 클릭하면 정답이 보이는 Expander 구조
-with st.expander(f"Q. {current_item['question']}", expanded=False):
+@st.cache_data(ttl=5)
+def load_data():
+    try:
+        url = st.secrets["gsheets_url"].strip()
+        # 질문(A), 정답(B) 2개 컬럼만 읽어옵니다.
+        df = conn.read(spreadsheet=url, worksheet=0, usecols=[0, 1])
+        df.columns = ['질문', '정답']
+        return df
+    except Exception as e:
+        st.error(f"데이터 로드 실패: {e}")
+        return None
+
+df = load_data()
+
+# --- 5. 화면 구성 ---
+if df is not None:
+    for _ in range(3): st.write("")
+    _, col2, _ = st.columns([1, 10, 1])
+
+    with col2:
+        # 대기 화면
+        if st.session_state.state == "IDLE":
+            st.markdown('<p class="question-text">준비되셨나요, 굿잡님?<br>인출 훈련 시작!</p>', unsafe_allow_html=True)
+            if st.button("훈련 시작 하기", type="primary"):
+                st.session_state.current_index = random.randint(0, len(df)-1)
+                st.session_state.state = "QUESTION"
+                st.rerun()
+
+        # 질문 화면
+        elif st.session_state.state == "QUESTION":
+            row = df.iloc[st.session_state.current_index]
+            score = st.session_state.session_scores.get(str(row['질문']), [0, 0])
+            st.markdown('<p class="info-text">지금 바로 떠올려보세요!</p>', unsafe_allow_html=True)
+            st.markdown(f'<p class="session-text">📈 이번 세션 성적 - 맞음: {score[0]} / 틀림: {score[1]}</p>', unsafe_allow_html=True)
+            st.markdown(f'<p class="question-text">Q. {row["질문"]}</p>', unsafe_allow_html=True)
+            if st.button("정답 확인하기"):
+                st.session_state.state = "ANSWER"
+                st.rerun()
+
+        # 정답 화면
+        elif st.session_state.state == "ANSWER":
+            row = df.iloc[st.session_state.current_index]
+            st.markdown(f'<p class="answer-text">A. {row["정답"]}</p>', unsafe_allow_html=True)
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("맞음 (O)", type="primary"):
+                    q = str(row['질문'])
+                    if q not in st.session_state.session_scores: st.session_state.session_scores[q] = [0, 0]
+                    st.session_state.session_scores[q][0] += 1
+                    st.session_state.current_index = random.randint(0, len(df)-1)
+                    st.session_state.state = "QUESTION"
+                    st.rerun()
+            with c2:
+                if st.button("틀림 (X)"):
+                    q = str(row['질문'])
+                    if q not in st.session_state.session_scores: st.session_state.session_scores[q] = [0, 0]
+                    st.session_state.session_scores[q][1] += 1
+                    st.session_state.current_index = random.randint(0, len(df)-1)
+                    st.session_state.state = "QUESTION"
+                    st.rerun()
+
+    # 하단 오답 분석
+    for _ in range(10): st.write("") 
     st.write("---")
-    st.success(f"**A. {current_item['answer']}**")
-
-st.write("") # 간격 조절
-
-# 4. 다음 문제 버튼
-if st.button("다음 문제 보기 ➡️"):
-    st.session_state.idx = random.randint(0, len(df) - 1)
-    st.rerun()
-
-# 5. 하단 고정 정보
-st.divider()
-st.caption("감정평가사 1차 경제학 핵심 개념 훈련 모드")
+    st.subheader("⚠️ 주의가 필요한 취약 문항 (Top 5)")
+    if st.session_state.session_scores:
+        summary_df = pd.DataFrame([{'질문': q, '틀림': s[1]} for q, s in st.session_state.session_scores.items() if s[1] > 0])
+        if not summary_df.empty:
+            st.table(summary_df.sort_values(by='틀림', ascending=False).head(5))
+else:
+    st.warning("구글 시트 설정을 확인해 주세요 (A열: 질문, B열: 정답).")
