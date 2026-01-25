@@ -7,8 +7,10 @@ import streamlit.components.v1 as components
 # 1. 페이지 설정
 st.set_page_config(page_title="감평 메모리 마스터", layout="wide")
 
-# 2. 세션 초기화 및 피보나치 설정
+# 2. 세션 및 피보나치 설정 (맞춘 문제는 기하급수적으로 멀어짐)
 is_pc = not any(x in st.context.headers.get("User-Agent", "").lower() for x in ["iphone", "ipad", "android", "mobile"])
+
+# 레벨별 복습 간격 (Lv 1~7)
 FIBO_GAP = [0, 5, 13, 21, 34, 55, 89, 144] 
 
 if 'session_scores' not in st.session_state: st.session_state.session_scores = {} 
@@ -18,25 +20,26 @@ if 'q_levels' not in st.session_state: st.session_state.q_levels = {}
 if 'schedules' not in st.session_state: st.session_state.schedules = {} 
 if 'solve_count' not in st.session_state: st.session_state.solve_count = 0
 
-# 3. 디자인 설정 (기억 강도 게이지 전용 CSS 추가)
+# 3. 디자인 설정 (기억 강도 게이지 및 하단바 위치 조정)
 st.markdown("""
 <style>
     .stApp { background-color: black; color: white; }
-    .info-text { font-size: 1.2rem !important; color: #888; text-align: center; }
+    .info-text { font-size: 1.1rem !important; color: #888; text-align: center; }
     
     /* 기억 강도 게이지 스타일 */
-    .memory-gauge-container { display: flex; flex-direction: column; align-items: center; margin-bottom: 20px; }
-    .memory-stars { font-size: 1.8rem; letter-spacing: 5px; margin-bottom: 5px; }
-    .strength-label { font-size: 1rem; font-weight: bold; padding: 3px 15px; border-radius: 20px; }
+    .memory-gauge-container { display: flex; flex-direction: column; align-items: center; margin-bottom: 30px; }
+    .memory-bars { font-size: 2.2rem; letter-spacing: 3px; margin-bottom: 5px; font-family: monospace; }
+    .strength-label { font-size: 0.9rem; font-weight: bold; padding: 4px 18px; border-radius: 20px; }
     
-    .question-text { font-size: 3.5rem !important; font-weight: bold; color: #f1c40f; text-align: center; margin: 20px 0; line-height: 1.3; }
-    .answer-text { font-size: 3.5rem !important; font-weight: bold; color: #2ecc71; text-align: center; margin: 20px 0; line-height: 1.3; }
+    .question-text { font-size: 3.5rem !important; font-weight: bold; color: #f1c40f; text-align: center; margin: 25px 0; line-height: 1.3; }
+    .answer-text { font-size: 3.5rem !important; font-weight: bold; color: #2ecc71; text-align: center; margin: 25px 0; line-height: 1.3; }
     
-    /* 상태바 위치 조정 */
-    .progress-container { width: 100%; background-color: #333; border-radius: 10px; margin-top: 100px; display: flex; height: 20px; overflow: hidden; }
+    /* 하단 상태바 위치 (더 아래로) */
+    .progress-container { width: 100%; background-color: #222; border-radius: 10px; margin-top: 150px; display: flex; height: 18px; overflow: hidden; border: 1px solid #444; }
     .bar-mastered { background-color: #2ecc71; }
     .bar-review { background-color: #e74c3c; }
     .bar-new { background-color: #3498db; }
+    .bar-stats { display: flex; justify-content: space-between; padding: 10px 5px; }
     
     div.stButton > button { width: 100%; height: 120px !important; font-size: 2.2rem !important; font-weight: bold !important; border-radius: 40px !important; background-color: #34495e; color: white; border: 3px solid #555; }
 </style>
@@ -56,22 +59,24 @@ def load_data():
 
 df = load_data()
 
-# 5. 기억 강도 렌더링 함수
+# 5. [수정] 세분화된 기억 강도 렌더링 (7칸 대응)
 def render_memory_gauge(level):
-    if level == 0:
-        stars, label, color = "░░░░░", "NEW", "#3498db"
-    elif level <= 2:
-        stars, label, color = "█░░░░", "DANGER (기억 불안정)", "#e74c3c"
-    elif level <= 4:
-        stars, label, color = "███░░", "KEEPING (작업 기억)", "#f39c12"
-    elif level <= 6:
-        stars, label, color = "████░", "SOLID (장기 기억화)", "#2ecc71"
-    else:
-        stars, label, color = "█████", "MASTERED (숙달 완료)", "#9b59b6"
+    # 각 레벨에 따른 시각적 피드백
+    gauge_map = {
+        0: ("░░░░░░░", "NEW (새로운 자극)", "#3498db"),
+        1: ("█░░░░░░", "DANGER (기억 불안정)", "#e74c3c"),
+        2: ("██░░░░░", "WARNING (약한 고리)", "#e67e22"),
+        3: ("███░░░░", "GOOD (인식 시작)", "#f1c40f"),
+        4: ("████░░░", "STABLE (기억 안착)", "#27ae60"),
+        5: ("█████░░", "STRONG (장기 기억화)", "#2ecc71"),
+        6: ("██████░", "EXPERT (숙달 완료)", "#1abc9c"),
+        7: ("███████", "MASTERED (졸업 준비)", "#9b59b6")
+    }
+    bars, label, color = gauge_map.get(level, gauge_map[7])
     
     return f"""
     <div class="memory-gauge-container">
-        <div class="memory-stars" style="color: {color};">{stars}</div>
+        <div class="memory-bars" style="color: {color};">{bars}</div>
         <div class="strength-label" style="background-color: {color}; color: white;">{label}</div>
     </div>
     """
@@ -95,13 +100,13 @@ if df is not None:
     _, col, _ = st.columns([1, 10, 1])
     with col:
         if st.session_state.current_index == "GRADUATED":
-            st.markdown('<p class="question-text">🎊 모든 회독 완료! 🎊</p>', unsafe_allow_html=True)
+            st.markdown('<p class="question-text">🎊 회계학 전 문항 정복! 🎊</p>', unsafe_allow_html=True)
             if st.button("다시 시작하기"):
                 st.session_state.q_levels = {}; st.session_state.schedules = {}; st.session_state.solve_count = 0
                 st.session_state.state = "IDLE"; st.session_state.current_index = None; st.rerun()
 
         elif st.session_state.state == "IDLE":
-            st.markdown('<p class="question-text">회계학 기억 강도 인출</p>', unsafe_allow_html=True)
+            st.markdown('<p class="question-text">기억 강도 기반 인출 훈련</p>', unsafe_allow_html=True)
             if st.button("훈련 시작 하기 (Space)", type="primary"):
                 st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
 
@@ -109,7 +114,6 @@ if df is not None:
             row = df.iloc[st.session_state.current_index]
             lv = st.session_state.q_levels.get(st.session_state.current_index, 0)
             
-            # [신규] 기억 강도 게이지 표시
             st.markdown(render_memory_gauge(lv), unsafe_allow_html=True)
             st.markdown(f'<p class="question-text">Q. {row["질문"]}</p>', unsafe_allow_html=True)
             if st.button("정답 확인하기 (Space)"): st.session_state.state = "ANSWER"; st.rerun()
@@ -123,7 +127,8 @@ if df is not None:
                 if st.button("맞음 (Ctrl)", type="primary"):
                     curr_lv = st.session_state.q_levels.get(q_idx, 0)
                     new_lv = curr_lv + 1
-                    if new_lv >= len(FIBO_GAP):
+                    
+                    if new_lv > 7: # Lv.7 통과 시 시트 반영
                         if is_pc:
                             try:
                                 df.iloc[q_idx, 2] += 1
@@ -132,21 +137,25 @@ if df is not None:
                         if q_idx in st.session_state.q_levels: del st.session_state.q_levels[q_idx]
                     else:
                         st.session_state.q_levels[q_idx] = new_lv
+                        # 맞힌 레벨이 높을수록 훨씬 뒤로 보냄
                         target = st.session_state.solve_count + FIBO_GAP[new_lv]
                         if target not in st.session_state.schedules: st.session_state.schedules[target] = []
                         st.session_state.schedules[target].append(q_idx)
+                    
                     st.session_state.solve_count += 1
                     st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
             with c2:
                 if st.button("틀림 (Alt)"):
+                    # 틀리면 즉시 Lv.1로 강등 및 5장 뒤 예약
                     st.session_state.q_levels[q_idx] = 1
-                    target = st.session_state.solve_count + FIBO_GAP[1]
+                    target = st.session_state.solve_count + 5 
                     if target not in st.session_state.schedules: st.session_state.schedules[target] = []
                     st.session_state.schedules[target].append(q_idx)
+                    
                     st.session_state.solve_count += 1
                     st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
 
-        # --- 하단 통합 상태바 ---
+        # --- 📊 하단 통합 상태바 ---
         total_q = len(df)
         mastered_q = len(df[df['정답횟수'] >= 5])
         reviewing_q = len(st.session_state.q_levels)
@@ -157,9 +166,9 @@ if df is not None:
                 <div class="bar-review" style="width: {(reviewing_q/total_q)*100}%"></div>
                 <div class="bar-new" style="width: {(new_q/total_q)*100}%"></div>
             </div>
-            <div style="display: flex; justify-content: space-between;">
+            <div class="bar-stats">
                 <p class="info-text">✅ 정복: {mastered_q}</p>
-                <p class="info-text">🔥 복습: {reviewing_q}</p>
+                <p class="info-text">🔥 복습 중: {reviewing_q}</p>
                 <p class="info-text">🆕 신규: {new_q}</p>
             </div>
         """, unsafe_allow_html=True)
