@@ -16,7 +16,7 @@ if 'q_wrong_levels' not in st.session_state: st.session_state.q_wrong_levels = {
 if 'schedules' not in st.session_state: st.session_state.schedules = {} 
 if 'solve_count' not in st.session_state: st.session_state.solve_count = 0
 
-# 3. 디자인 설정 (하얀 버튼 방지 및 다크 테마)
+# 3. 디자인 설정
 st.markdown("""
 <style>
     .stApp { background-color: black; color: white; }
@@ -28,7 +28,6 @@ st.markdown("""
     .question-text { font-size: 3.5rem !important; font-weight: bold; color: #f1c40f; text-align: center; margin: 25px 0; line-height: 1.3; }
     .answer-text { font-size: 4.0rem !important; font-weight: bold; color: #2ecc71; text-align: center; margin: 25px 0; line-height: 1.3; }
     
-    /* 버튼 스타일 고정 (하얀색 방지) */
     div.stButton > button { 
         width: 100% !important; height: 110px !important; 
         font-size: 1.8rem !important; font-weight: bold !important; 
@@ -37,8 +36,6 @@ st.markdown("""
         background-color: #34495e !important; 
         border: 2px solid #555 !important;
     }
-    div.stButton > button:hover { border-color: #f1c40f !important; }
-
     .progress-container { width: 100%; background-color: #222; border-radius: 10px; margin-top: 130px; display: flex; height: 18px; overflow: hidden; border: 1px solid #444; }
     .bar-mastered { background-color: #2ecc71; }
     .bar-review { background-color: #e74c3c; }
@@ -46,7 +43,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 4. 데이터 로드 (Secrets의 gsheets_url 단일 사용)
+# 4. 데이터 로드 (nan 방지 로직 추가)
 conn = st.connection("gsheets", type=GSheetsConnection)
 @st.cache_data(ttl=1)
 def load_data():
@@ -54,14 +51,19 @@ def load_data():
         url = st.secrets["gsheets_url"].strip()
         df = conn.read(spreadsheet=url, worksheet=0, usecols=[0,1,2,3,4,5,6])
         df.columns = ['질문', '정답', '정답횟수', '오답횟수', '어려움횟수', '정상횟수', '쉬움횟수']
+        
+        # [핵심] 질문이 비어있는 행(nan)은 아예 삭제합니다.
+        df = df.dropna(subset=['질문'])
+        df = df[df['질문'].str.strip() != ""] # 공백만 있는 줄도 삭제
+        
         for col in ['정답횟수', '오답횟수', '어려움횟수', '정상횟수', '쉬움횟수']:
             df[col] = pd.to_numeric(df[col]).fillna(0).astype(int)
-        return df
+        return df.reset_index(drop=True)
     except: return None
 
 df = load_data()
 
-# 5. UI 렌더링 함수들
+# 5. UI 및 로직 함수
 def render_dual_gauge(correct_lv, wrong_lv):
     w_bars = "█" * min(wrong_lv, 7); w_empty = "░" * (7 - len(w_bars))
     c_bars = "█" * min(correct_lv, 7); c_empty = "░" * (7 - len(c_bars))
@@ -71,19 +73,21 @@ def get_next_question(dataframe):
     curr_cnt = st.session_state.solve_count
     pending = [k for k in st.session_state.schedules.keys() if k <= curr_cnt and st.session_state.schedules[k]]
     if pending: return st.session_state.schedules[pending[0]].pop(0)
+    
     all_sched = [idx for sublist in st.session_state.schedules.values() for idx in sublist]
     avail = [i for i in range(len(dataframe)) if int(dataframe.iloc[i]['정답횟수']) < 5 and i not in all_sched]
+    
     if avail: return random.choice(avail)
     future = sorted([k for k in st.session_state.schedules.keys() if k > curr_cnt and st.session_state.schedules[k]])
     if future: return st.session_state.schedules[future[0]].pop(0)
     return "GRADUATED"
 
-# --- 6. 메인 화면 구성 ---
+# --- 6. 화면 구성 ---
 if df is not None:
     _, col, _ = st.columns([1, 10, 1])
     with col:
         if st.session_state.current_index == "GRADUATED":
-            st.markdown('<p class="question-text">🎊 모든 회독 목표 달성! 🎊</p>', unsafe_allow_html=True)
+            st.markdown('<p class="question-text">🎊 모든 회독 완료! 🎊</p>', unsafe_allow_html=True)
             if st.button("처음부터 다시 시작하기"):
                 st.session_state.q_levels = {}; st.session_state.q_wrong_levels = {}; st.session_state.schedules = {}; st.session_state.solve_count = 0
                 st.session_state.state = "IDLE"; st.session_state.current_index = None; st.rerun()
@@ -145,12 +149,11 @@ if df is not None:
                     st.session_state.solve_count += 1
                     st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
 
-        # 하단 통합 상태바
         tot = len(df); m_q = len(df[df['정답횟수'] >= 5]); r_q = len(st.session_state.q_levels); n_q = tot - m_q - r_q
         st.markdown(f'<div class="progress-container"><div class="bar-mastered" style="width:{(m_q/tot)*100}%"></div><div class="bar-review" style="width:{(r_q/tot)*100}%"></div><div class="bar-new" style="width:{(n_q/tot)*100}%"></div></div>', unsafe_allow_html=True)
-        st.markdown(f'<div style="display:flex; justify-content:space-between; padding:10px;"><p>✅정복:{m_q}</p><p>🔥복습:{r_q}</p><p>🆕신규:{n_q}</p></div>', unsafe_allow_html=True)
+        st.markdown(f'<div style="display:flex; justify-content:space-between; padding:10px;"><p>✅정복:{m_q}</p><p>🔥복습:{r_q}</p><p>🆕남은새문제:{n_q}</p></div>', unsafe_allow_html=True)
 
-# 7. 단축키 엔진 (Ctrl <-> Alt 제안 반영)
+# 7. 단축키 엔진 (Ctrl=어려움, Alt=정상)
 components.html("""
     <script>
     const doc = window.parent.document;
