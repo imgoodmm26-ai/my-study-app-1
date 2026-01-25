@@ -5,7 +5,7 @@ import random
 import streamlit.components.v1 as components
 
 # 1. 페이지 설정
-st.set_page_config(page_title="감평 데이터 마스터", layout="wide")
+st.set_page_config(page_title="감평 데이터 마스터 (단축키 복구)", layout="wide")
 
 # 2. 세션 및 피보나치 설정
 is_pc = not any(x in st.context.headers.get("User-Agent", "").lower() for x in ["iphone", "ipad", "android", "mobile"])
@@ -18,7 +18,7 @@ if 'q_wrong_levels' not in st.session_state: st.session_state.q_wrong_levels = {
 if 'schedules' not in st.session_state: st.session_state.schedules = {} 
 if 'solve_count' not in st.session_state: st.session_state.solve_count = 0
 
-# 3. 디자인 설정
+# 3. 디자인 설정 (디자인 유지 및 하얀 버튼 방지)
 st.markdown("""
 <style>
     .stApp { background-color: black; color: white; }
@@ -45,7 +45,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 4. 데이터 로드 (7개 열을 모두 읽어옵니다)
+# 4. 데이터 로드 (7개 열 읽기)
 conn = st.connection("gsheets", type=GSheetsConnection)
 @st.cache_data(ttl=1)
 def load_data():
@@ -53,7 +53,6 @@ def load_data():
         url = st.secrets["gsheets_url"].strip()
         df = conn.read(spreadsheet=url, worksheet=0, usecols=[0,1,2,3,4,5,6])
         df.columns = ['질문', '정답', '정답횟수', '오답횟수', '어려움횟수', '정상횟수', '쉬움횟수']
-        # 숫자 데이터 타입 강제 변환
         for col in ['정답횟수', '오답횟수', '어려움횟수', '정상횟수', '쉬움횟수']:
             df[col] = pd.to_numeric(df[col]).fillna(0).astype(int)
         return df
@@ -90,7 +89,7 @@ if df is not None:
                 st.session_state.state = "IDLE"; st.session_state.current_index = None; st.rerun()
 
         elif st.session_state.state == "IDLE":
-            st.markdown('<p class="question-text">3단계 확신도 시스템</p>', unsafe_allow_html=True)
+            st.markdown('<p class="question-text">단축키 복구 인출 시스템</p>', unsafe_allow_html=True)
             if st.button("훈련 시작 하기 (Space)"):
                 st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
 
@@ -107,13 +106,13 @@ if df is not None:
             
             c1, c2, c3 = st.columns(3)
             with c1:
-                if st.button("어려움/헷갈림 (1)"):
+                if st.button("어려움/헷갈림 (1/Alt)"):
                     st.session_state.q_wrong_levels[q_idx] = st.session_state.q_wrong_levels.get(q_idx, 0) + 1
                     st.session_state.q_levels[q_idx] = 1
                     if is_pc:
                         try:
-                            df.iloc[q_idx, 3] += 1 # 오답횟수 증가
-                            df.iloc[q_idx, 4] += 1 # 어려움횟수 증가
+                            df.iloc[q_idx, 3] += 1 # 오답횟수
+                            df.iloc[q_idx, 4] += 1 # 어려움횟수
                             conn.update(spreadsheet=st.secrets["gsheets_url"], data=df)
                         except: pass
                     target = st.session_state.solve_count + 5
@@ -122,12 +121,12 @@ if df is not None:
                     st.session_state.solve_count += 1
                     st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
             with c2:
-                if st.button("정상/알겠음 (2)"):
+                if st.button("정상/알겠음 (2/Ctrl)"):
                     new_lv = st.session_state.q_levels.get(q_idx, 0) + 1
                     if is_pc:
                         try:
-                            df.iloc[q_idx, 5] += 1 # 정상횟수 증가
-                            if new_lv > 7: df.iloc[q_idx, 2] += 1 # 최종 정답횟수 증가
+                            df.iloc[q_idx, 5] += 1 # 정상횟수
+                            if new_lv > 7: df.iloc[q_idx, 2] += 1 # 정답횟수
                             conn.update(spreadsheet=st.secrets["gsheets_url"], data=df)
                         except: pass
                     if new_lv > 7:
@@ -143,8 +142,8 @@ if df is not None:
                 if st.button("너무 쉬움/졸업"):
                     if is_pc:
                         try:
-                            df.iloc[q_idx, 2] += 1 # 정답횟수 증가
-                            df.iloc[q_idx, 6] += 1 # 쉬움횟수 증가
+                            df.iloc[q_idx, 2] += 1 # 정답횟수
+                            df.iloc[q_idx, 6] += 1 # 쉬움횟수
                             conn.update(spreadsheet=st.secrets["gsheets_url"], data=df)
                         except: pass
                     if q_idx in st.session_state.q_levels: del st.session_state.q_levels[q_idx]
@@ -156,14 +155,23 @@ if df is not None:
         st.markdown(f'<div class="progress-container"><div class="bar-mastered" style="width:{(m_q/tot)*100}%"></div><div class="bar-review" style="width:{(r_q/tot)*100}%"></div><div class="bar-new" style="width:{(n_q/tot)*100}%"></div></div>', unsafe_allow_html=True)
         st.markdown(f'<div style="display:flex; justify-content:space-between; padding:10px;"><p>✅정복:{m_q}</p><p>🔥복습:{r_q}</p><p>🆕남은새문제:{n_q}</p></div>', unsafe_allow_html=True)
 
-# 8. 단축키 엔진
+# 8. [핵심] 단축키 엔진 (Ctrl, Alt, 1, 2 모두 지원)
 components.html("""
     <script>
     const doc = window.parent.document;
     doc.addEventListener('keydown', function(e) {
-        if (e.code === 'Space') { e.preventDefault(); const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('확인') || el.innerText.includes('시작')); if (btn) btn.click(); }
-        else if (e.key === '1') { const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('어려움')); if (btn) btn.click(); }
-        else if (e.key === '2') { const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('정상')); if (btn) btn.click(); }
+        if (e.code === 'Space') {
+            e.preventDefault();
+            const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('확인') || el.innerText.includes('시작'));
+            if (btn) btn.click();
+        } else if (e.key === 'Control' || e.key === '2') {
+            const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('정상'));
+            if (btn) btn.click();
+        } else if (e.key === 'Alt' || e.key === '1') {
+            e.preventDefault();
+            const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('어려움'));
+            if (btn) btn.click();
+        }
     });
     </script>
 """, height=0)
