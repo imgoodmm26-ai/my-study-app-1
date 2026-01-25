@@ -4,9 +4,9 @@ import pandas as pd
 import random
 
 # 1. 페이지 설정
-st.set_page_config(page_title="감평 인출 훈련기 (안정화)", layout="wide")
+st.set_page_config(page_title="감평 인출 훈련기 (성적 추적)", layout="wide")
 
-# 2. 기기 감지 (PC: 시트저장 활성화 / 모바일: 기기저장)
+# 2. 기기 감지
 is_pc = not any(x in st.context.headers.get("User-Agent", "").lower() for x in ["iphone", "ipad", "android", "mobile"])
 
 # 3. 세션 상태 초기화
@@ -14,7 +14,7 @@ if 'session_scores' not in st.session_state: st.session_state.session_scores = {
 if 'state' not in st.session_state: st.session_state.state = "IDLE"
 if 'current_index' not in st.session_state: st.session_state.current_index = None
 
-# 4. 디자인 설정 (에러 방지를 위해 군더더기 없이 구성)
+# 4. 디자인 설정
 st.markdown("""
 <style>
     .stApp { background-color: black; color: white; }
@@ -27,7 +27,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 5. 데이터 로드 (정답횟수, 오답횟수 열 인식)
+# 5. 데이터 로드
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 @st.cache_data(ttl=2)
@@ -43,13 +43,11 @@ def load_data():
 
 df = load_data()
 
-# 5회 마스터 졸업 로직
 def get_next_question(dataframe):
     if dataframe is None: return None
     available = []
     for idx in range(len(dataframe)):
         q_text = str(dataframe.iloc[idx]['질문'])
-        # (시트 점수 + 현재 세션 점수) 합산
         total_ok = int(dataframe.iloc[idx]['정답횟수']) + st.session_state.session_scores.get(q_text, [0, 0])[0]
         if total_ok < 5:
             available.append(idx)
@@ -75,8 +73,12 @@ if df is not None:
 
         elif st.session_state.state == "QUESTION":
             row = df.iloc[st.session_state.current_index]
+            # 정답/오답 횟수 계산
             ok_cnt = int(row['정답횟수']) + st.session_state.session_scores.get(str(row['질문']), [0, 0])[0]
-            st.markdown(f'<p class="info-text">누적 정답: {ok_cnt}/5</p>', unsafe_allow_html=True)
+            fail_cnt = int(row['오답횟수']) + st.session_state.session_scores.get(str(row['질문']), [0, 0])[1]
+            
+            # 상단에 정답과 오답을 함께 표시
+            st.markdown(f'<p class="info-text">누적 정답: {ok_cnt}/5 | 누적 오답: {fail_cnt}회</p>', unsafe_allow_html=True)
             st.markdown(f'<p class="question-text">Q. {row["질문"]}</p>', unsafe_allow_html=True)
             if st.button("정답 확인하기"):
                 st.session_state.state = "ANSWER"; st.rerun()
@@ -109,7 +111,6 @@ if df is not None:
                         except: pass
                     st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
 
-    # 하단 오답 분석
     st.write("---")
     err_df = pd.DataFrame([{'질문': q, '틀림': s[1]} for q, s in st.session_state.session_scores.items() if s[1] > 0])
     if not err_df.empty:
