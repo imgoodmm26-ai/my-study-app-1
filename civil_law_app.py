@@ -5,7 +5,7 @@ import random
 import streamlit.components.v1 as components
 
 # 1. 페이지 설정
-st.set_page_config(page_title="감평 듀얼 마스터 (데이터 완벽 동기화)", layout="wide")
+st.set_page_config(page_title="감평 단축키 최적화 인출기", layout="wide")
 
 # 2. 세션 초기화
 FIBO_GAP = [0, 5, 13, 21, 34, 55, 89, 144] 
@@ -16,7 +16,18 @@ if 'q_wrong_levels' not in st.session_state: st.session_state.q_wrong_levels = {
 if 'schedules' not in st.session_state: st.session_state.schedules = {} 
 if 'solve_count' not in st.session_state: st.session_state.solve_count = 0
 
-# 3. 디자인 설정 (버튼 하얀색 버그 수정 및 듀얼 게이지 레이아웃)
+# 3. 과목 선택 사이드바
+with st.sidebar:
+    st.markdown("### 📚 과목 선택")
+    subject = st.selectbox("공부할 과목을 골라주세요", ["회계학", "민법"])
+    if 'last_subject' not in st.session_state or st.session_state.last_subject != subject:
+        st.session_state.last_subject = subject
+        st.session_state.state = "IDLE"; st.session_state.current_index = None
+        st.session_state.q_levels = {}; st.session_state.q_wrong_levels = {}
+        st.session_state.schedules = {}; st.session_state.solve_count = 0
+        st.cache_data.clear(); st.rerun()
+
+# 4. 디자인 설정 (하얀 버튼 방지 및 레이아웃)
 st.markdown("""
 <style>
     .stApp { background-color: black; color: white; }
@@ -28,9 +39,9 @@ st.markdown("""
     .question-text { font-size: 3.5rem !important; font-weight: bold; color: #f1c40f; text-align: center; margin: 25px 0; line-height: 1.3; }
     .answer-text { font-size: 4.0rem !important; font-weight: bold; color: #2ecc71; text-align: center; margin: 25px 0; line-height: 1.3; }
     
-    /* 버튼 시인성 강화 (하얀 배경 방지) */
+    /* 버튼 스타일 (하얀색 방지) */
     div.stButton > button { 
-        width: 100%; height: 110px !important; 
+        width: 100% !important; height: 110px !important; 
         font-size: 1.8rem !important; font-weight: bold !important; 
         border-radius: 30px !important; 
         color: white !important; 
@@ -44,12 +55,13 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 4. 데이터 로드 (7개 열 명시)
+# 5. 데이터 로드
+target_url = st.secrets["gsheets_url"] if subject == "회계학" else st.secrets["gsheets_civil_law"]
 conn = st.connection("gsheets", type=GSheetsConnection)
+
 @st.cache_data(ttl=1)
-def load_data():
+def load_data(url):
     try:
-        url = st.secrets["gsheets_url"].strip()
         df = conn.read(spreadsheet=url, worksheet=0, usecols=[0,1,2,3,4,5,6])
         df.columns = ['질문', '정답', '정답횟수', '오답횟수', '어려움횟수', '정상횟수', '쉬움횟수']
         for col in ['정답횟수', '오답횟수', '어려움횟수', '정상횟수', '쉬움횟수']:
@@ -57,15 +69,15 @@ def load_data():
         return df
     except: return None
 
-df = load_data()
+df = load_data(target_url)
 
-# 5. 듀얼 게이지 렌더링
+# 6. 듀얼 게이지 렌더링
 def render_dual_gauge(correct_lv, wrong_lv):
     w_bars = "█" * min(wrong_lv, 7); w_empty = "░" * (7 - len(w_bars))
     c_bars = "█" * min(correct_lv, 7); c_empty = "░" * (7 - len(c_bars))
     return f'<div class="dual-gauge-container"><div class="gauge-row"><span class="wrong-side">{w_empty}{w_bars}</span><span class="center-line">|</span><span class="correct-side">{c_bars}{c_empty}</span></div></div>'
 
-# 6. 출제 로직
+# 7. 출제 로직
 def get_next_question(dataframe):
     curr_cnt = st.session_state.solve_count
     pending = [k for k in st.session_state.schedules.keys() if k <= curr_cnt and st.session_state.schedules[k]]
@@ -74,21 +86,21 @@ def get_next_question(dataframe):
     avail = [i for i in range(len(dataframe)) if int(dataframe.iloc[i]['정답횟수']) < 5 and i not in all_sched]
     if avail: return random.choice(avail)
     future = sorted([k for k in st.session_state.schedules.keys() if k > curr_cnt and st.session_state.schedules[k]])
-    if future: return st.session_state.schedules[future[keys[0]]].pop(0)
+    if future: return st.session_state.schedules[future[0]].pop(0)
     return "GRADUATED"
 
-# --- 7. 화면 구성 ---
+# --- 8. 화면 구성 ---
 if df is not None:
     _, col, _ = st.columns([1, 10, 1])
     with col:
         if st.session_state.current_index == "GRADUATED":
-            st.markdown('<p class="question-text">🎊 회독 목표 달성! 🎊</p>', unsafe_allow_html=True)
-            if st.button("다시 시작하기"):
+            st.markdown('<p class="question-text">🎊 모든 회독 완료! 🎊</p>', unsafe_allow_html=True)
+            if st.button("처음부터 다시 시작하기"):
                 st.session_state.q_levels = {}; st.session_state.q_wrong_levels = {}; st.session_state.schedules = {}; st.session_state.solve_count = 0
                 st.session_state.state = "IDLE"; st.session_state.current_index = None; st.rerun()
 
         elif st.session_state.state == "IDLE":
-            st.markdown('<p class="question-text">데이터 동기화 인출 시스템</p>', unsafe_allow_html=True)
+            st.markdown('<p class="question-text">3단계 확신도 인출 시스템</p>', unsafe_allow_html=True)
             if st.button("훈련 시작 하기 (Space)"):
                 st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
 
@@ -105,13 +117,12 @@ if df is not None:
             
             c1, c2, c3 = st.columns(3)
             with c1:
-                if st.button("어려움/헷갈림 (1/Alt)"):
+                if st.button("어려움/헷갈림 (1/Ctrl)"):
                     st.session_state.q_wrong_levels[q_idx] = st.session_state.q_wrong_levels.get(q_idx, 0) + 1
-                    st.session_state.q_levels[q_idx] = 1 # 레벨 초기화
+                    st.session_state.q_levels[q_idx] = 1
                     try:
-                        df.at[q_idx, '오답횟수'] += 1
-                        df.at[q_idx, '어려움횟수'] += 1
-                        conn.update(spreadsheet=st.secrets["gsheets_url"], data=df)
+                        df.at[q_idx, '오답횟수'] += 1; df.at[q_idx, '어려움횟수'] += 1
+                        conn.update(spreadsheet=target_url, data=df)
                     except: pass
                     target = st.session_state.solve_count + 5
                     if target not in st.session_state.schedules: st.session_state.schedules[target] = []
@@ -119,12 +130,12 @@ if df is not None:
                     st.session_state.solve_count += 1
                     st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
             with c2:
-                if st.button("정상/알겠음 (2/Ctrl)"):
+                if st.button("정상/알겠음 (2/Alt)"):
                     new_lv = st.session_state.q_levels.get(q_idx, 0) + 1
                     try:
                         df.at[q_idx, '정상횟수'] += 1
                         if new_lv > 7: df.at[q_idx, '정답횟수'] += 1
-                        conn.update(spreadsheet=st.secrets["gsheets_url"], data=df)
+                        conn.update(spreadsheet=target_url, data=df)
                     except: pass
                     if new_lv > 7:
                         if q_idx in st.session_state.q_levels: del st.session_state.q_levels[q_idx]
@@ -138,9 +149,8 @@ if df is not None:
             with c3:
                 if st.button("너무 쉬움/졸업"):
                     try:
-                        df.at[q_idx, '정답횟수'] += 1
-                        df.at[q_idx, '쉬움횟수'] += 1
-                        conn.update(spreadsheet=st.secrets["gsheets_url"], data=df)
+                        df.at[q_idx, '정답횟수'] += 1; df.at[q_idx, '쉬움횟수'] += 1
+                        conn.update(spreadsheet=target_url, data=df)
                     except: pass
                     if q_idx in st.session_state.q_levels: del st.session_state.q_levels[q_idx]
                     st.session_state.solve_count += 1
@@ -149,16 +159,25 @@ if df is not None:
         # 하단 상태바
         tot = len(df); m_q = len(df[df['정답횟수'] >= 5]); r_q = len(st.session_state.q_levels); n_q = tot - m_q - r_q
         st.markdown(f'<div class="progress-container"><div class="bar-mastered" style="width:{(m_q/tot)*100}%"></div><div class="bar-review" style="width:{(r_q/tot)*100}%"></div><div class="bar-new" style="width:{(n_q/tot)*100}%"></div></div>', unsafe_allow_html=True)
-        st.markdown(f'<div style="display:flex; justify-content:space-between; padding:10px;"><p>✅정복:{m_q}</p><p>🔥복습:{r_q}</p><p>🆕신규:{n_q}</p></div>', unsafe_allow_html=True)
+        st.markdown(f'<div style="display:flex; justify-content:space-between; padding:10px;"><p>✅정복:{m_q}</p><p>🔥복습:{r_q}</p><p>🆕남은새문제:{n_q}</p></div>', unsafe_allow_html=True)
 
-# 8. 단축키 엔진 (모든 키 복구)
+# 9. [핵심] 단축키 엔진 (요청하신 대로 Ctrl <-> Alt 스왑)
 components.html("""
     <script>
     const doc = window.parent.document;
     doc.addEventListener('keydown', function(e) {
-        if (e.code === 'Space') { e.preventDefault(); const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('확인') || el.innerText.includes('시작')); if (btn) btn.click(); }
-        else if (e.key === 'Control' || e.key === '2') { const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('정상')); if (btn) btn.click(); }
-        else if (e.key === 'Alt' || e.key === '1') { e.preventDefault(); const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('어려움')); if (btn) btn.click(); }
+        if (e.code === 'Space') {
+            e.preventDefault();
+            const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('확인') || el.innerText.includes('시작'));
+            if (btn) btn.click();
+        } else if (e.key === 'Control' || e.key === '1') {
+            const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('어려움'));
+            if (btn) btn.click();
+        } else if (e.key === 'Alt' || e.key === '2') {
+            e.preventDefault();
+            const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('정상'));
+            if (btn) btn.click();
+        }
     });
     </script>
 """, height=0)
