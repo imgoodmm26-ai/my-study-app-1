@@ -4,12 +4,12 @@ import pandas as pd
 import random
 
 # 1. 페이지 설정
-st.set_page_config(page_title="감평 피보나치 훈련기", layout="wide")
+st.set_page_config(page_title="감평 피보나치 마스터 (에러 수정판)", layout="wide")
 
 # 2. 기기 및 세션 초기화
 is_pc = not any(x in st.context.headers.get("User-Agent", "").lower() for x in ["iphone", "ipad", "android", "mobile"])
 
-# [핵심] 피보나치 간격 설정 (Lv1: 5, Lv2: 8, Lv3: 13, Lv4: 21, Lv5: 34)
+# 피보나치 간격 설정 (Lv1: 5, Lv2: 8, Lv3: 13, Lv4: 21, Lv5: 34)
 FIBO = [0, 5, 8, 13, 21, 34]
 
 if 'session_scores' not in st.session_state: st.session_state.session_scores = {} 
@@ -17,8 +17,8 @@ if 'state' not in st.session_state: st.session_state.state = "IDLE"
 if 'current_index' not in st.session_state: st.session_state.current_index = None
 
 # 스케줄링 관리 변수
-if 'q_levels' not in st.session_state: st.session_state.q_levels = {} # {인덱스: 현재레벨}
-if 'schedules' not in st.session_state: st.session_state.schedules = {} # {타겟_solve_count: [인덱스들]}
+if 'q_levels' not in st.session_state: st.session_state.q_levels = {} 
+if 'schedules' not in st.session_state: st.session_state.schedules = {} 
 if 'solve_count' not in st.session_state: st.session_state.solve_count = 0
 
 # 3. 디자인 설정
@@ -42,28 +42,30 @@ def load_data():
         url = st.secrets["gsheets_url"].strip()
         df = conn.read(spreadsheet=url, worksheet=0, usecols=[0,1,2,3])
         df.columns = ['질문', '정답', '정답횟수', '오답횟수']
+        # 숫자 데이터 강제 변환
+        df['정답횟수'] = pd.to_numeric(df['정답횟수']).fillna(0).astype(int)
+        df['오답횟수'] = pd.to_numeric(df['오답횟수']).fillna(0).astype(int)
         return df
     except: return None
 
 df = load_data()
 
-# 5. [핵심] 피보나치 스케줄링 출제 로직
+# 5. [핵심 수정] 피보나치 스케줄링 및 에러 방지 로직
 def get_next_question(dataframe):
     curr_cnt = st.session_state.solve_count
     
-    # 우선순위 1: 현재 카운트에 예약된 복습 문제가 있는가?
+    # [우선순위 1] 현재 카운트에 예약된 복습 문제가 있는가?
     if curr_cnt in st.session_state.schedules and st.session_state.schedules[curr_cnt]:
         return st.session_state.schedules[curr_cnt].pop(0)
     
-    # 우선순위 2: 새 문제 랜덤 추출 (GSheet 기준 정답 5회 미만인 것)
-    # 이미 어딘가에 예약된 문제는 제외
+    # [우선순위 2] 새 문제 랜덤 추출 (시트 정답 5회 미만 + 예약 안 된 것)
     scheduled_indices = [idx for sublist in st.session_state.schedules.values() for idx in sublist]
     available = [i for i in range(len(dataframe)) if int(dataframe.iloc[i]['정답횟수']) < 5 and i not in scheduled_indices]
     
     if available:
         return random.choice(available)
     
-    # 우선순위 3: 더 이상 낼 문제가 없으면 미래 예약 문제 중 가장 가까운 것 가져오기
+    # [우선순위 3] 새 문제도 없고 현재 복습할 것도 없다면, 미래 예약 문제 중 가장 가까운 것 가져오기
     future_counts = sorted([k for k in st.session_state.schedules.keys() if k > curr_cnt and st.session_state.schedules[k]])
     if future_counts:
         next_target = future_counts[0]
@@ -85,7 +87,12 @@ if df is not None:
         elif st.session_state.state == "IDLE":
             st.markdown('<p class="question-text">회계학 Lv.5 피보나치 훈련</p>', unsafe_allow_html=True)
             if st.button("훈련 시작 하기", type="primary"):
-                st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
+                next_q = get_next_question(df)
+                if next_q != "GRADUATED":
+                    st.session_state.current_index = next_q
+                    st.session_state.state = "QUESTION"; st.rerun()
+                else:
+                    st.session_state.current_index = "GRADUATED"; st.rerun()
 
         elif st.session_state.state == "QUESTION":
             row = df.iloc[st.session_state.current_index]
@@ -109,25 +116,25 @@ if df is not None:
                     new_lv = curr_lv + 1
                     
                     if new_lv > 5:
-                        # [졸업] 최종 34장 뒤 복습 성공 시 시트 반영
+                        # 최종 Level 5 통과 시 시트 반영
                         if is_pc:
                             try:
                                 df.iloc[q_idx, 2] += 1
                                 conn.update(spreadsheet=st.secrets["gsheets_url"], data=df)
                             except: pass
-                        st.session_state.q_levels[q_idx] = 0 # 레벨 초기화
+                        st.session_state.q_levels[q_idx] = 0 
                     else:
                         st.session_state.q_levels[q_idx] = new_lv
-                        # 다음 복습 시점 예약 (현재 count + 피보나치 간격)
                         target = st.session_state.solve_count + FIBO[new_lv]
                         if target not in st.session_state.schedules: st.session_state.schedules[target] = []
                         st.session_state.schedules[target].append(q_idx)
                     
                     st.session_state.solve_count += 1
-                    st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
+                    st.session_state.current_index = get_next_question(df)
+                    st.session_state.state = "QUESTION"; st.rerun()
             with c2:
                 if st.button("틀림 (X)"):
-                    # 틀리면 즉시 Lv.1로 강등 및 5장 뒤 예약
+                    # 틀리면 즉시 Lv.1로 강등
                     st.session_state.q_levels[q_idx] = 1
                     target = st.session_state.solve_count + FIBO[1]
                     if target not in st.session_state.schedules: st.session_state.schedules[target] = []
@@ -140,4 +147,5 @@ if df is not None:
                         except: pass
                         
                     st.session_state.solve_count += 1
-                    st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
+                    st.session_state.current_index = get_next_question(df)
+                    st.session_state.state = "QUESTION"; st.rerun()
