@@ -16,7 +16,7 @@ if 'q_wrong_levels' not in st.session_state: st.session_state.q_wrong_levels = {
 if 'schedules' not in st.session_state: st.session_state.schedules = {} 
 if 'solve_count' not in st.session_state: st.session_state.solve_count = 0
 
-# 3. 디자인 설정
+# 3. 디자인 설정 (기존 디자인 유지)
 st.markdown("""
 <style>
     .stApp { background-color: black; color: white; }
@@ -27,15 +27,7 @@ st.markdown("""
     .center-line { color: #555; font-weight: bold; }
     .question-text { font-size: 3.5rem !important; font-weight: bold; color: #f1c40f; text-align: center; margin: 25px 0; line-height: 1.3; }
     .answer-text { font-size: 4.0rem !important; font-weight: bold; color: #2ecc71; text-align: center; margin: 25px 0; line-height: 1.3; }
-    
-    div.stButton > button { 
-        width: 100% !important; height: 110px !important; 
-        font-size: 1.8rem !important; font-weight: bold !important; 
-        border-radius: 30px !important; 
-        color: white !important; 
-        background-color: #34495e !important; 
-        border: 2px solid #555 !important;
-    }
+    div.stButton > button { width: 100% !important; height: 110px !important; font-size: 1.8rem !important; font-weight: bold !important; border-radius: 30px !important; color: white !important; background-color: #34495e !important; border: 2px solid #555 !important; }
     .progress-container { width: 100%; background-color: #222; border-radius: 10px; margin-top: 130px; display: flex; height: 18px; overflow: hidden; border: 1px solid #444; }
     .bar-mastered { background-color: #2ecc71; }
     .bar-review { background-color: #e74c3c; }
@@ -43,32 +35,35 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 4. 데이터 로드 (nan 방지 로직 추가)
+# 4. 데이터 로드 (빈 행/열 자동 필터링 로직)
 conn = st.connection("gsheets", type=GSheetsConnection)
 @st.cache_data(ttl=1)
 def load_data():
     try:
         url = st.secrets["gsheets_url"].strip()
-        df = conn.read(spreadsheet=url, worksheet=0, usecols=[0,1,2,3,4,5,6])
+        # [수정] usecols를 제거하고 전체를 읽은 뒤 필요한 부분만 자릅니다.
+        df_raw = conn.read(spreadsheet=url, worksheet=0)
+        
+        # 앞쪽 7개 열만 가져오기 (질문~쉬움횟수)
+        df = df_raw.iloc[:, :7]
         df.columns = ['질문', '정답', '정답횟수', '오답횟수', '어려움횟수', '정상횟수', '쉬움횟수']
         
-        # [핵심] 질문이 비어있는 행(nan)은 아예 삭제합니다.
+        # [핵심] 질문이 비어있는(NaN) 행과 공백만 있는 행을 완벽하게 제거
         df = df.dropna(subset=['질문'])
-        df = df[df['질문'].str.strip() != ""] # 공백만 있는 줄도 삭제
+        df = df[df['질문'].astype(str).str.strip() != ""]
         
+        # 숫자 데이터 변환
         for col in ['정답횟수', '오답횟수', '어려움횟수', '정상횟수', '쉬움횟수']:
             df[col] = pd.to_numeric(df[col]).fillna(0).astype(int)
+            
+        # [중요] 인덱스를 0부터 다시 매겨서 IndexError 방지
         return df.reset_index(drop=True)
-    except: return None
+    except:
+        return None
 
 df = load_data()
 
-# 5. UI 및 로직 함수
-def render_dual_gauge(correct_lv, wrong_lv):
-    w_bars = "█" * min(wrong_lv, 7); w_empty = "░" * (7 - len(w_bars))
-    c_bars = "█" * min(correct_lv, 7); c_empty = "░" * (7 - len(c_bars))
-    return f'<div class="dual-gauge-container"><div class="gauge-row"><span class="wrong-side">{w_empty}{w_bars}</span><span class="center-line">|</span><span class="correct-side">{c_bars}{c_empty}</span></div></div>'
-
+# 5. 유틸리티 함수
 def get_next_question(dataframe):
     curr_cnt = st.session_state.solve_count
     pending = [k for k in st.session_state.schedules.keys() if k <= curr_cnt and st.session_state.schedules[k]]
@@ -84,6 +79,10 @@ def get_next_question(dataframe):
 
 # --- 6. 화면 구성 ---
 if df is not None:
+    # 안전장치: 현재 인덱스가 데이터 범위를 벗어났다면(시트 수정 등) 초기화
+    if isinstance(st.session_state.current_index, int) and st.session_state.current_index >= len(df):
+        st.session_state.current_index = get_next_question(df)
+
     _, col, _ = st.columns([1, 10, 1])
     with col:
         if st.session_state.current_index == "GRADUATED":
@@ -99,7 +98,13 @@ if df is not None:
 
         elif st.session_state.state == "QUESTION":
             row = df.iloc[st.session_state.current_index]
-            st.markdown(render_dual_gauge(st.session_state.q_levels.get(st.session_state.current_index, 0), st.session_state.q_wrong_levels.get(st.session_state.current_index, 0)), unsafe_allow_html=True)
+            c_lv = st.session_state.q_levels.get(st.session_state.current_index, 0)
+            w_lv = st.session_state.q_wrong_levels.get(st.session_state.current_index, 0)
+            
+            w_bars = "█" * min(w_lv, 7); w_empty = "░" * (7 - len(w_bars))
+            c_bars = "█" * min(c_lv, 7); c_empty = "░" * (7 - len(c_bars))
+            st.markdown(f'<div class="dual-gauge-container"><div class="gauge-row"><span class="wrong-side">{w_empty}{w_bars}</span><span class="center-line">|</span><span class="correct-side">{c_bars}{c_empty}</span></div></div>', unsafe_allow_html=True)
+            
             st.markdown(f'<p class="question-text">Q. {row["질문"]}</p>', unsafe_allow_html=True)
             if st.button("정답 확인하기 (Space)"): st.session_state.state = "ANSWER"; st.rerun()
 
@@ -149,11 +154,12 @@ if df is not None:
                     st.session_state.solve_count += 1
                     st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
 
+        # 하단 바
         tot = len(df); m_q = len(df[df['정답횟수'] >= 5]); r_q = len(st.session_state.q_levels); n_q = tot - m_q - r_q
         st.markdown(f'<div class="progress-container"><div class="bar-mastered" style="width:{(m_q/tot)*100}%"></div><div class="bar-review" style="width:{(r_q/tot)*100}%"></div><div class="bar-new" style="width:{(n_q/tot)*100}%"></div></div>', unsafe_allow_html=True)
         st.markdown(f'<div style="display:flex; justify-content:space-between; padding:10px;"><p>✅정복:{m_q}</p><p>🔥복습:{r_q}</p><p>🆕남은새문제:{n_q}</p></div>', unsafe_allow_html=True)
 
-# 7. 단축키 엔진 (Ctrl=어려움, Alt=정상)
+# 7. 단축키 엔진
 components.html("""
     <script>
     const doc = window.parent.document;
