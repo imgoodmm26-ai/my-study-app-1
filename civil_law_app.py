@@ -15,9 +15,9 @@ if 'q_levels' not in st.session_state: st.session_state.q_levels = {}
 if 'q_wrong_levels' not in st.session_state: st.session_state.q_wrong_levels = {}
 if 'schedules' not in st.session_state: st.session_state.schedules = {} 
 if 'solve_count' not in st.session_state: st.session_state.solve_count = 0
-if 'last_msg' not in st.session_state: st.session_state.last_msg = "52개 문항을 완벽히 정복할 준비가 되셨나요?"
+if 'last_msg' not in st.session_state: st.session_state.last_msg = "너무 쉬운 문제는 즉시 졸업 시킵니다!"
 
-# 3. 디자인 설정 (와이드 게이지 & 한 줄 유지 CSS)
+# 3. 디자인 설정 (와이드 게이지 한 줄 고정)
 st.markdown("""
 <style>
     .stApp { background-color: black; color: white; }
@@ -26,15 +26,14 @@ st.markdown("""
     .badge-new { background-color: #f1c40f; color: black; }
     .badge-review { background-color: #3498db; color: white; }
     
-    /* [수정] 듀얼 게이지 와이드 & 한 줄 고정 스타일 */
     .dual-gauge-container { display: flex; flex-direction: column; align-items: center; margin-bottom: 35px; width: 100%; }
     .gauge-row { 
         font-size: 2.2rem; font-family: 'Courier New', monospace; 
         display: flex; align-items: center; justify-content: center;
         white-space: nowrap; overflow: hidden; width: 100%; 
     }
-    .wrong-side { color: #e74c3c; text-align: right; width: 450px; letter-spacing: 1px; } /* 더 길게 확장 */
-    .correct-side { color: #9b59b6; text-align: left; width: 450px; letter-spacing: 1px; } /* 더 길게 확장 */
+    .wrong-side { color: #e74c3c; text-align: right; width: 450px; letter-spacing: 1px; }
+    .correct-side { color: #9b59b6; text-align: left; width: 450px; letter-spacing: 1px; }
     .center-line { color: #555; font-weight: bold; font-size: 2.5rem; margin: 0 15px; }
     
     .question-text { font-size: 3.5rem !important; font-weight: bold; color: #f1c40f; text-align: center; margin: 25px 0; line-height: 1.3; }
@@ -46,33 +45,35 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 4. 데이터 로드 (빈 줄/열 완벽 제거)
+# 4. 데이터 로드
 conn = st.connection("gsheets", type=GSheetsConnection)
 @st.cache_data(ttl=1)
 def load_data():
     try:
         url = st.secrets["gsheets_url"].strip()
         df_raw = conn.read(spreadsheet=url, worksheet=0)
-        df = df_raw.iloc[:, :7] # 딱 앞쪽 7개 열만
+        df = df_raw.iloc[:, :7]
         df.columns = ['질문', '정답', '정답횟수', '오답횟수', '어려움횟수', '정상횟수', '쉬움횟수']
-        df = df.dropna(subset=['질문']) # 질문 없는 행 제거
-        df = df[df['질문'].astype(str).str.strip() != ""] # 공백 행 제거
+        df = df.dropna(subset=['질문']).reset_index(drop=True)
         for col in ['정답횟수', '오답횟수', '어려움횟수', '정상횟수', '쉬움횟수']:
             df[col] = pd.to_numeric(df[col]).fillna(0).astype(int)
-        return df.reset_index(drop=True)
+        return df
     except: return None
 
-df = load_data()
+if 'df' not in st.session_state: st.session_state.df = load_data()
+df = st.session_state.df
 
-# 5. 하이브리드 출제 로직 (50% 비중)
+# 5. 출제 로직 (50% 신규 보장)
 def get_next_question(dataframe):
     curr_cnt = st.session_state.solve_count
     all_scheduled = [idx for sublist in st.session_state.schedules.values() for idx in sublist]
+    
+    # 정답횟수 5회 미만인 것들만 후보
     available_new = [i for i in range(len(dataframe)) if int(dataframe.iloc[i]['정답횟수']) < 5 and i not in all_scheduled]
     pending_keys = sorted([k for k in st.session_state.schedules.keys() if k <= curr_cnt and st.session_state.schedules[k]])
     
     if available_new and pending_keys:
-        if random.random() < 0.5: return random.choice(available_new) # 50% 확률로 무작위 신규 추출
+        if random.random() < 0.5: return random.choice(available_new)
         else: return st.session_state.schedules[pending_keys[0]].pop(0)
     if available_new: return random.choice(available_new)
     if pending_keys: return st.session_state.schedules[pending_keys[0]].pop(0)
@@ -90,7 +91,7 @@ if df is not None:
         st.markdown(f'<p class="feedback-text">{st.session_state.last_msg}</p>', unsafe_allow_html=True)
         
         if st.session_state.current_index == "GRADUATED":
-            st.markdown('<p class="question-text">🎊 52문항 정복 완료! 🎊</p>', unsafe_allow_html=True)
+            st.markdown('<p class="question-text">🎊 모든 문항 정복 완료! 🎊</p>', unsafe_allow_html=True)
             if st.button("처음부터 다시 시작하기"):
                 st.session_state.q_levels = {}; st.session_state.q_wrong_levels = {}; st.session_state.schedules = {}; st.session_state.solve_count = 0
                 st.session_state.state = "IDLE"; st.session_state.current_index = None; st.rerun()
@@ -108,7 +109,6 @@ if df is not None:
             label = f'<div style="text-align:center;"><span class="status-badge badge-new">🆕 신규 문항</span></div>' if c_lv == 0 else f'<div style="text-align:center;"><span class="status-badge badge-review">🔥 Lv.{c_lv} 복습</span></div>'
             st.markdown(label, unsafe_allow_html=True)
             
-            # [수정] 와이드 게이지 (총 20칸 대응으로 더 길게 표시)
             w_bars = "█" * min(w_lv, 20); w_empty = "░" * (20 - len(w_bars))
             c_bars = "█" * min(c_lv, 20); c_empty = "░" * (20 - len(c_bars))
             st.markdown(f'<div class="dual-gauge-container"><div class="gauge-row"><span class="wrong-side">{w_empty}{w_bars}</span><span class="center-line">|</span><span class="correct-side">{c_bars}{c_empty}</span></div></div>', unsafe_allow_html=True)
@@ -127,18 +127,18 @@ if df is not None:
                     st.session_state.q_wrong_levels[q_idx] = st.session_state.q_wrong_levels.get(q_idx, 0) + 1
                     st.session_state.q_levels[q_idx] = 1
                     st.session_state.last_msg = "괜찮습니다! 5장 뒤에 다시 공략하죠."
-                    try: df.at[q_idx, '오답횟수'] += 1; df.at[q_idx, '어려움횟수'] += 1; conn.update(spreadsheet=st.secrets["gsheets_url"], data=df)
+                    df.at[q_idx, '오답횟수'] += 1; df.at[q_idx, '어려움횟수'] += 1
+                    try: conn.update(spreadsheet=st.secrets["gsheets_url"], data=df)
                     except: pass
                     target = st.session_state.solve_count + 5; st.session_state.schedules.setdefault(target, []).append(q_idx)
                     st.session_state.solve_count += 1; st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
             with c2:
                 if st.button("정상 (2/Alt)"):
                     new_lv = st.session_state.q_levels.get(q_idx, 0) + 1
-                    st.session_state.last_msg = "완벽한 인출입니다! 기억이 단단해졌어요."
-                    try:
-                        df.at[q_idx, '정상횟수'] += 1
-                        if new_lv > 7: df.at[q_idx, '정답횟수'] += 1
-                        conn.update(spreadsheet=st.secrets["gsheets_url"], data=df)
+                    st.session_state.last_msg = "기억이 단단해졌어요!"
+                    df.at[q_idx, '정상횟수'] += 1
+                    if new_lv > 7: df.at[q_idx, '정답횟수'] += 1
+                    try: conn.update(spreadsheet=st.secrets["gsheets_url"], data=df)
                     except: pass
                     if new_lv > 7: del st.session_state.q_levels[q_idx]
                     else:
@@ -147,8 +147,10 @@ if df is not None:
                     st.session_state.solve_count += 1; st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
             with c3:
                 if st.button("너무 쉬움"):
-                    st.session_state.last_msg = "정복 완료! 더 멀리 보냅니다."
-                    try: df.at[q_idx, '정답횟수'] += 1; df.at[q_idx, '쉬움횟수'] += 1; conn.update(spreadsheet=st.secrets["gsheets_url"], data=df)
+                    st.session_state.last_msg = "🎊 정복 완료! 이제 이 문제는 졸업입니다."
+                    # [핵심] 너무 쉬우면 즉시 5점으로 만들어 졸업시킴
+                    df.at[q_idx, '정답횟수'] = 5; df.at[q_idx, '쉬움횟수'] += 1
+                    try: conn.update(spreadsheet=st.secrets["gsheets_url"], data=df)
                     except: pass
                     if q_idx in st.session_state.q_levels: del st.session_state.q_levels[q_idx]
                     st.session_state.solve_count += 1; st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
