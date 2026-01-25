@@ -5,7 +5,7 @@ import random
 import streamlit.components.v1 as components
 
 # 1. 페이지 설정
-st.set_page_config(page_title="감평 50:50 하이브리드 인출기", layout="wide")
+st.set_page_config(page_title="감평 와이드 인출기", layout="wide")
 
 # 2. 세션 및 피보나치 설정
 FIBO_GAP = [0, 5, 13, 21, 34, 55, 89, 144] 
@@ -15,9 +15,9 @@ if 'q_levels' not in st.session_state: st.session_state.q_levels = {}
 if 'q_wrong_levels' not in st.session_state: st.session_state.q_wrong_levels = {}
 if 'schedules' not in st.session_state: st.session_state.schedules = {} 
 if 'solve_count' not in st.session_state: st.session_state.solve_count = 0
-if 'last_msg' not in st.session_state: st.session_state.last_msg = "신규 문항 비중을 50%로 높였습니다. 즐거운 열공 되세요!"
+if 'last_msg' not in st.session_state: st.session_state.last_msg = "게이지를 더 길게 확장했습니다. 시각적으로 압도해 보세요!"
 
-# 3. 디자인 설정 (기존 유지)
+# 3. 디자인 설정 (듀얼 게이지 와이드 버전 적용)
 st.markdown("""
 <style>
     .stApp { background-color: black; color: white; }
@@ -25,13 +25,20 @@ st.markdown("""
     .status-badge { font-size: 1rem; font-weight: bold; padding: 4px 12px; border-radius: 15px; margin-bottom: 10px; display: inline-block; }
     .badge-new { background-color: #f1c40f; color: black; }
     .badge-review { background-color: #3498db; color: white; }
+    
+    /* 듀얼 게이지 와이드 스타일 */
     .dual-gauge-container { display: flex; flex-direction: column; align-items: center; margin-bottom: 35px; }
-    .gauge-row { font-size: 2.2rem; font-family: monospace; display: flex; align-items: center; gap: 15px; }
-    .wrong-side { color: #e74c3c; text-align: right; width: 180px; }
-    .correct-side { color: #9b59b6; text-align: left; width: 180px; }
+    .gauge-row { font-size: 2.5rem; font-family: 'Courier New', monospace; display: flex; align-items: center; gap: 20px; }
+    .wrong-side { color: #e74c3c; text-align: right; width: 350px; letter-spacing: 2px; } /* 폭 확장 */
+    .correct-side { color: #9b59b6; text-align: left; width: 350px; letter-spacing: 2px; } /* 폭 확장 */
+    .center-line { color: #555; font-weight: bold; font-size: 3rem; }
+    
     .question-text { font-size: 3.5rem !important; font-weight: bold; color: #f1c40f; text-align: center; margin: 20px 0; line-height: 1.3; }
     .answer-text { font-size: 4.0rem !important; font-weight: bold; color: #2ecc71; text-align: center; margin: 25px 0; line-height: 1.3; }
+    
     div.stButton > button { width: 100% !important; height: 110px !important; font-size: 1.8rem !important; font-weight: bold !important; border-radius: 30px !important; color: white !important; background-color: #34495e !important; border: 2px solid #555 !important; }
+    div.stButton > button:hover { border-color: #f1c40f !important; }
+
     .progress-container { width: 100%; background-color: #222; border-radius: 10px; margin-top: 100px; display: flex; height: 18px; overflow: hidden; border: 1px solid #444; }
     .bar-mastered { background-color: #2ecc71; }
     .bar-review { background-color: #e74c3c; }
@@ -39,7 +46,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 4. 데이터 로드 (빈 줄 제거 & 인덱스 리셋)
+# 4. 데이터 로드 (빈 줄 제거 로직 포함)
 conn = st.connection("gsheets", type=GSheetsConnection)
 @st.cache_data(ttl=1)
 def load_data():
@@ -56,32 +63,20 @@ def load_data():
 
 df = load_data()
 
-# 5. [수정] 50:50 하이브리드 출제 로직
+# 5. 50% 하이브리드 출제 로직
 def get_next_question(dataframe):
     curr_cnt = st.session_state.solve_count
-    
-    # 1. 신규 문항 후보군 (아직 정복되지 않았고 예약되지 않은 것)
     all_scheduled = [idx for sublist in st.session_state.schedules.values() for idx in sublist]
     available_new = [i for i in range(len(dataframe)) if int(dataframe.iloc[i]['정답횟수']) < 5 and i not in all_scheduled]
-    
-    # 2. 복습 문항 후보군 (현재 시점 이전에 예약된 것)
     pending_keys = sorted([k for k in st.session_state.schedules.keys() if k <= curr_cnt and st.session_state.schedules[k]])
     
-    # [핵심] 50% 확률 로직
     if available_new and pending_keys:
-        if random.random() < 0.5: # 정확히 0.5 비율로 신규 출제
-            return random.choice(available_new)
-        else:
-            return st.session_state.schedules[pending_keys[0]].pop(0)
-            
-    # 후보가 한 종류만 남았을 경우
+        if random.random() < 0.5: return random.choice(available_new)
+        else: return st.session_state.schedules[pending_keys[0]].pop(0)
     if available_new: return random.choice(available_new)
     if pending_keys: return st.session_state.schedules[pending_keys[0]].pop(0)
-    
-    # 미래 예약분 당겨오기
     future_keys = sorted([k for k in st.session_state.schedules.keys() if k > curr_cnt and st.session_state.schedules[k]])
     if future_keys: return st.session_state.schedules[future_keys[0]].pop(0)
-    
     return "GRADUATED"
 
 # --- 6. 화면 구성 ---
@@ -94,13 +89,13 @@ if df is not None:
         st.markdown(f'<p class="feedback-text">{st.session_state.last_msg}</p>', unsafe_allow_html=True)
         
         if st.session_state.current_index == "GRADUATED":
-            st.markdown('<p class="question-text">🎊 회독 목표 달성! 🎊</p>', unsafe_allow_html=True)
+            st.markdown('<p class="question-text">🎊 회차 정복 완료! 🎊</p>', unsafe_allow_html=True)
             if st.button("처음부터 다시 시작하기"):
                 st.session_state.q_levels = {}; st.session_state.q_wrong_levels = {}; st.session_state.schedules = {}; st.session_state.solve_count = 0
                 st.session_state.state = "IDLE"; st.session_state.current_index = None; st.rerun()
 
         elif st.session_state.state == "IDLE":
-            st.markdown('<p class="question-text">50:50 하이브리드 시스템</p>', unsafe_allow_html=True)
+            st.markdown('<p class="question-text">와이드 게이지 인출 시스템</p>', unsafe_allow_html=True)
             if st.button("훈련 시작 하기 (Space)"):
                 st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
 
@@ -109,17 +104,25 @@ if df is not None:
             c_lv = st.session_state.q_levels.get(st.session_state.current_index, 0)
             w_lv = st.session_state.q_wrong_levels.get(st.session_state.current_index, 0)
             
-            # 상태 라벨
+            # 상단 라벨
             label_html = '<div style="text-align:center;">'
             if c_lv == 0: label_html += '<span class="status-badge badge-new">🆕 신규 문항 (50% 비중)</span>'
             else: label_html += f'<span class="status-badge badge-review">🔥 Lv.{c_lv} 복습 중</span>'
             label_html += '</div>'
             st.markdown(label_html, unsafe_allow_html=True)
             
-            # 듀얼 게이지
-            w_bars = "█" * min(w_lv, 7); w_empty = "░" * (7 - len(w_bars))
-            c_bars = "█" * min(c_lv, 7); c_empty = "░" * (7 - len(c_bars))
-            st.markdown(f'<div class="dual-gauge-container"><div class="gauge-row"><span class="wrong-side">{w_empty}{w_bars}</span><span class="center-line">|</span><span class="correct-side">{c_bars}{c_empty}</span></div></div>', unsafe_allow_html=True)
+            # [수정] 와이드 듀얼 게이지 렌더링 (15칸으로 확장)
+            w_bars = "█" * min(w_lv, 15); w_empty = "░" * (15 - len(w_bars))
+            c_bars = "█" * min(c_lv, 15); c_empty = "░" * (15 - len(c_bars))
+            st.markdown(f"""
+                <div class="dual-gauge-container">
+                    <div class="gauge-row">
+                        <span class="wrong-side">{w_empty}{w_bars}</span>
+                        <span class="center-line">|</span>
+                        <span class="correct-side">{c_bars}{c_empty}</span>
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
             
             st.markdown(f'<p class="question-text">Q. {row["질문"]}</p>', unsafe_allow_html=True)
             if st.button("정답 확인하기 (Space)"): st.session_state.state = "ANSWER"; st.rerun()
@@ -131,7 +134,7 @@ if df is not None:
             
             c1, c2, c3 = st.columns(3)
             with c1:
-                if st.button("어려움/헷갈림 (1/Ctrl)"):
+                if st.button("어려움 (1/Ctrl)"):
                     st.session_state.q_wrong_levels[q_idx] = st.session_state.q_wrong_levels.get(q_idx, 0) + 1
                     st.session_state.q_levels[q_idx] = 1
                     st.session_state.last_msg = "괜찮습니다. 5장 뒤에 다시 만나죠!"
@@ -145,7 +148,7 @@ if df is not None:
                     st.session_state.solve_count += 1
                     st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
             with c2:
-                if st.button("정상/알겠음 (2/Alt)"):
+                if st.button("정상 (2/Alt)"):
                     new_lv = st.session_state.q_levels.get(q_idx, 0) + 1
                     st.session_state.last_msg = "훌륭합니다! 기억이 점점 탄탄해집니다."
                     try:
@@ -163,7 +166,7 @@ if df is not None:
                     st.session_state.solve_count += 1
                     st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
             with c3:
-                if st.button("너무 쉬움/졸업"):
+                if st.button("너무 쉬움"):
                     st.session_state.last_msg = "완벽히 정복! 목록에서 제외합니다."
                     try:
                         df.at[q_idx, '정답횟수'] += 1; df.at[q_idx, '쉬움횟수'] += 1
