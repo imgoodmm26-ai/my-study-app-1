@@ -4,18 +4,19 @@ import pandas as pd
 import random
 
 # 1. 페이지 설정
-st.set_page_config(page_title="감평 인출기 (카운팅 완벽 해결)", layout="wide")
+st.set_page_config(page_title="감평 5주기 인출기", layout="wide")
 
 # 2. 기기 감지
 is_pc = not any(x in st.context.headers.get("User-Agent", "").lower() for x in ["iphone", "ipad", "android", "mobile"])
 
-# 3. 세션 상태 초기화 (핵심: 세션 점수 저장소 확인)
-if 'session_scores' not in st.session_state:
-    st.session_state.session_scores = {} # { '질문': [맞음, 틀림] }
-if 'state' not in st.session_state:
-    st.session_state.state = "IDLE"
-if 'current_index' not in st.session_state:
-    st.session_state.current_index = None
+# 3. 세션 상태 초기화 (오답 대기열 및 카운터 추가)
+if 'session_scores' not in st.session_state: st.session_state.session_scores = {} 
+if 'state' not in st.session_state: st.session_state.state = "IDLE"
+if 'current_index' not in st.session_state: st.session_state.current_index = None
+
+# [신규] 오답 순환 시스템용 변수
+if 'wrong_queue' not in st.session_state: st.session_state.wrong_queue = [] # 틀린 문제 대기열
+if 'solve_count' not in st.session_state: st.session_state.solve_count = 0  # 5문제를 세는 카운터
 
 # 4. 디자인 설정
 st.markdown("""
@@ -25,45 +26,47 @@ st.markdown("""
     .info-text { font-size: 1.6rem !important; color: #aaaaaa; font-weight: bold; text-align: center; margin-bottom: 20px; }
     .question-text { font-size: 3.5rem !important; font-weight: bold; color: #f1c40f; text-align: center; margin: 30px 0; line-height: 1.3; }
     .answer-text { font-size: 3.5rem !important; font-weight: bold; color: #2ecc71; text-align: center; margin: 30px 0; line-height: 1.3; }
+    .wait-tag { color: #e74c3c; font-weight: bold; font-size: 1.1rem; text-align: center; }
     div.stButton > button { width: 100%; height: 130px !important; font-size: 2.5rem !important; font-weight: bold !important; border-radius: 40px !important; background-color: #34495e; color: white; border: 3px solid #555; }
 </style>
 """, unsafe_allow_html=True)
 
-# 5. 데이터 로드 (시트 헤더를 강제로 맞춰줍니다)
+# 5. 데이터 로드
 conn = st.connection("gsheets", type=GSheetsConnection)
-
-@st.cache_data(ttl=1) # TTL을 1초로 줄여 실시간 반영을 돕습니다
+@st.cache_data(ttl=1)
 def load_data():
     try:
         url = st.secrets["gsheets_url"].strip()
         df = conn.read(spreadsheet=url, worksheet=0, usecols=[0,1,2,3])
-        # 시트의 열 이름을 강제로 [질문, 정답, 정답횟수, 오답횟수]로 고정
         df.columns = ['질문', '정답', '정답횟수', '오답횟수']
         df['정답횟수'] = pd.to_numeric(df['정답횟수']).fillna(0).astype(int)
         df['오답횟수'] = pd.to_numeric(df['오답횟수']).fillna(0).astype(int)
         return df
-    except Exception as e:
-        st.error(f"데이터 로드 실패: {e}")
-        return None
+    except: return None
 
 df = load_data()
 
-# 5회 성공 시 졸업 로직
+# [핵심] 5주기 다음 문제 결정 로직
 def get_next_question(dataframe):
-    if dataframe is None: return None
-    available = []
-    for idx in range(len(dataframe)):
-        q_text = str(dataframe.iloc[idx]['질문'])
-        # 시트 값 + 이번 판 점수
-        score = st.session_state.session_scores.get(q_text, [0, 0])
-        total_ok = int(dataframe.iloc[idx]['정답횟수']) + score[0]
-        if total_ok < 5:
-            available.append(idx)
-    return random.choice(available) if available else "GRADUATED"
+    # 1. 4문제를 풀었고(현재가 5번째) 오답 대기열에 문제가 있다면 우선 출제
+    if st.session_state.wrong_queue and st.session_state.solve_count >= 4:
+        st.session_state.solve_count = 0 # 카운트 리셋
+        return st.session_state.wrong_queue.pop(0) # 대기열 맨 앞 문제 추출
+    
+    # 2. 그 외에는 일반 랜덤 추출 (5회 미만 정답자 중)
+    available = [i for i in range(len(dataframe)) if (int(dataframe.iloc[i]['정답횟수']) + st.session_state.session_scores.get(str(dataframe.iloc[i]['질문']), [0, 0])[0]) < 5]
+    
+    # 대기열에만 문제가 남은 경우 처리
+    if not available:
+        if st.session_state.wrong_queue:
+            return st.session_state.wrong_queue.pop(0)
+        return "GRADUATED"
+    
+    return random.choice(available)
 
 # --- 6. 화면 구성 ---
 if df is not None:
-    mode_text = "💻 PC 모드 (기록 동기화)" if is_pc else "📱 모바일 모드 (세션 저장)"
+    mode_text = "💻 PC 모드" if is_pc else "📱 모바일 모드"
     st.markdown(f'<p class="device-tag">{mode_text}</p>', unsafe_allow_html=True)
 
     _, col, _ = st.columns([1, 10, 1])
@@ -71,10 +74,11 @@ if df is not None:
         if st.session_state.current_index == "GRADUATED":
             st.markdown('<p class="question-text">🎊 모든 문제를 정복하셨습니다! 🎊</p>', unsafe_allow_html=True)
             if st.button("처음부터 다시 시작하기"):
-                st.session_state.session_scores = {}; st.session_state.state = "IDLE"; st.session_state.current_index = None; st.rerun()
+                st.session_state.session_scores = {}; st.session_state.wrong_queue = []; st.session_state.solve_count = 0
+                st.session_state.state = "IDLE"; st.session_state.current_index = None; st.rerun()
 
         elif st.session_state.state == "IDLE":
-            st.markdown('<p class="question-text">회계학 인출 훈련 시작</p>', unsafe_allow_html=True)
+            st.markdown('<p class="question-text">회계학 5주기 인출 훈련</p>', unsafe_allow_html=True)
             if st.button("훈련 시작 하기", type="primary"):
                 st.session_state.current_index = get_next_question(df)
                 st.session_state.state = "QUESTION"; st.rerun()
@@ -82,13 +86,14 @@ if df is not None:
         elif st.session_state.state == "QUESTION":
             row = df.iloc[st.session_state.current_index]
             q_name = str(row['질문'])
-            
-            # 현재 카운팅 계산 (시트 + 세션)
             session_data = st.session_state.session_scores.get(q_name, [0, 0])
             ok_cnt = int(row['정답횟수']) + session_data[0]
             fail_cnt = int(row['오답횟수']) + session_data[1]
             
             st.markdown(f'<p class="info-text">누적 정답: {ok_cnt}/5 | 누적 오답: {fail_cnt}회</p>', unsafe_allow_html=True)
+            if st.session_state.wrong_queue:
+                st.markdown(f'<p class="wait-tag">⚠️ 복습 대기 중인 오답: {len(st.session_state.wrong_queue)}개 (주기: {st.session_state.solve_count+1}/5)</p>', unsafe_allow_html=True)
+            
             st.markdown(f'<p class="question-text">Q. {row["질문"]}</p>', unsafe_allow_html=True)
             if st.button("정답 확인하기"):
                 st.session_state.state = "ANSWER"; st.rerun()
@@ -102,7 +107,7 @@ if df is not None:
                 if st.button("맞음 (O)", type="primary"):
                     q = str(row['질문'])
                     if q not in st.session_state.session_scores: st.session_state.session_scores[q] = [0, 0]
-                    st.session_state.session_scores[q][0] += 1 # 즉시 카운트 증가
+                    st.session_state.session_scores[q][0] += 1
                     
                     if is_pc:
                         try:
@@ -110,13 +115,15 @@ if df is not None:
                             conn.update(spreadsheet=st.secrets["gsheets_url"], data=df)
                         except: pass
                     
+                    # 맞히면 카운트만 올리고 다음 문제로
+                    st.session_state.solve_count += 1
                     st.session_state.current_index = get_next_question(df)
                     st.session_state.state = "QUESTION"; st.rerun()
             with c2:
                 if st.button("틀림 (X)"):
                     q = str(row['질문'])
                     if q not in st.session_state.session_scores: st.session_state.session_scores[q] = [0, 0]
-                    st.session_state.session_scores[q][1] += 1 # 즉시 카운트 증가
+                    st.session_state.session_scores[q][1] += 1
                     
                     if is_pc:
                         try:
@@ -124,5 +131,10 @@ if df is not None:
                             conn.update(spreadsheet=st.secrets["gsheets_url"], data=df)
                         except: pass
                     
+                    # [핵심] 틀리면 대기열에 추가하고 카운트 올림
+                    if st.session_state.current_index not in st.session_state.wrong_queue:
+                        st.session_state.wrong_queue.append(st.session_state.current_index)
+                    
+                    st.session_state.solve_count += 1
                     st.session_state.current_index = get_next_question(df)
                     st.session_state.state = "QUESTION"; st.rerun()
