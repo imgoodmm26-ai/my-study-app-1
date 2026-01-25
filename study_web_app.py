@@ -5,7 +5,7 @@ import random
 import streamlit.components.v1 as components
 
 # 1. 페이지 설정
-st.set_page_config(page_title="감평 확신도 인출기", layout="wide")
+st.set_page_config(page_title="감평 데이터 마스터", layout="wide")
 
 # 2. 세션 및 피보나치 설정
 is_pc = not any(x in st.context.headers.get("User-Agent", "").lower() for x in ["iphone", "ipad", "android", "mobile"])
@@ -18,22 +18,18 @@ if 'q_wrong_levels' not in st.session_state: st.session_state.q_wrong_levels = {
 if 'schedules' not in st.session_state: st.session_state.schedules = {} 
 if 'solve_count' not in st.session_state: st.session_state.solve_count = 0
 
-# 3. 디자인 설정 (하얀 버튼 버그 수정 및 3버튼 레이아웃)
+# 3. 디자인 설정
 st.markdown("""
 <style>
     .stApp { background-color: black; color: white; }
-    
-    /* 듀얼 게이지 스타일 */
     .dual-gauge-container { display: flex; flex-direction: column; align-items: center; margin-bottom: 35px; }
     .gauge-row { font-size: 2.2rem; font-family: monospace; display: flex; align-items: center; gap: 15px; }
     .wrong-side { color: #e74c3c; text-align: right; width: 180px; }
     .correct-side { color: #9b59b6; text-align: left; width: 180px; }
     .center-line { color: #555; font-weight: bold; }
-
     .question-text { font-size: 3.5rem !important; font-weight: bold; color: #f1c40f; text-align: center; margin: 25px 0; line-height: 1.3; }
     .answer-text { font-size: 4.0rem !important; font-weight: bold; color: #2ecc71; text-align: center; margin: 25px 0; line-height: 1.3; }
     
-    /* 버튼 색상 강제 지정 (하얀색 방지) */
     div.stButton > button { 
         width: 100%; height: 110px !important; 
         font-size: 1.8rem !important; font-weight: bold !important; 
@@ -42,9 +38,6 @@ st.markdown("""
         background-color: #34495e !important; 
         border: 2px solid #555 !important; 
     }
-    /* 특정 버튼 색상 강조 */
-    div.stButton > button:hover { border-color: #f1c40f !important; }
-    
     .progress-container { width: 100%; background-color: #222; border-radius: 10px; margin-top: 100px; display: flex; height: 18px; overflow: hidden; border: 1px solid #444; }
     .bar-mastered { background-color: #2ecc71; }
     .bar-review { background-color: #e74c3c; }
@@ -52,15 +45,17 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 4. 데이터 로드
+# 4. 데이터 로드 (7개 열을 모두 읽어옵니다)
 conn = st.connection("gsheets", type=GSheetsConnection)
 @st.cache_data(ttl=1)
 def load_data():
     try:
         url = st.secrets["gsheets_url"].strip()
-        df = conn.read(spreadsheet=url, worksheet=0, usecols=[0,1,2,3])
-        df.columns = ['질문', '정답', '정답횟수', '오답횟수']
-        df['정답횟수'] = pd.to_numeric(df['정답횟수']).fillna(0).astype(int)
+        df = conn.read(spreadsheet=url, worksheet=0, usecols=[0,1,2,3,4,5,6])
+        df.columns = ['질문', '정답', '정답횟수', '오답횟수', '어려움횟수', '정상횟수', '쉬움횟수']
+        # 숫자 데이터 타입 강제 변환
+        for col in ['정답횟수', '오답횟수', '어려움횟수', '정상횟수', '쉬움횟수']:
+            df[col] = pd.to_numeric(df[col]).fillna(0).astype(int)
         return df
     except: return None
 
@@ -70,13 +65,7 @@ df = load_data()
 def render_dual_gauge(correct_lv, wrong_lv):
     w_bars = "█" * min(wrong_lv, 7); w_empty = "░" * (7 - len(w_bars))
     c_bars = "█" * min(correct_lv, 7); c_empty = "░" * (7 - len(c_bars))
-    return f"""
-    <div class="dual-gauge-container">
-        <div class="gauge-row">
-            <span class="wrong-side">{w_empty}{w_bars}</span><span class="center-line">|</span><span class="correct-side">{c_bars}{c_empty}</span>
-        </div>
-    </div>
-    """
+    return f'<div class="dual-gauge-container"><div class="gauge-row"><span class="wrong-side">{w_empty}{w_bars}</span><span class="center-line">|</span><span class="correct-side">{c_bars}{c_empty}</span></div></div>'
 
 # 6. 출제 로직
 def get_next_question(dataframe):
@@ -116,12 +105,17 @@ if df is not None:
             q_idx = st.session_state.current_index
             st.markdown(f'<p class="answer-text">A. {row["정답"]}</p>', unsafe_allow_html=True)
             
-            # [수정] 3개 버튼 레이아웃
             c1, c2, c3 = st.columns(3)
             with c1:
                 if st.button("어려움/헷갈림 (1)"):
                     st.session_state.q_wrong_levels[q_idx] = st.session_state.q_wrong_levels.get(q_idx, 0) + 1
-                    st.session_state.q_levels[q_idx] = 1 # 레벨 강등
+                    st.session_state.q_levels[q_idx] = 1
+                    if is_pc:
+                        try:
+                            df.iloc[q_idx, 3] += 1 # 오답횟수 증가
+                            df.iloc[q_idx, 4] += 1 # 어려움횟수 증가
+                            conn.update(spreadsheet=st.secrets["gsheets_url"], data=df)
+                        except: pass
                     target = st.session_state.solve_count + 5
                     if target not in st.session_state.schedules: st.session_state.schedules[target] = []
                     st.session_state.schedules[target].append(q_idx)
@@ -130,10 +124,13 @@ if df is not None:
             with c2:
                 if st.button("정상/알겠음 (2)"):
                     new_lv = st.session_state.q_levels.get(q_idx, 0) + 1
+                    if is_pc:
+                        try:
+                            df.iloc[q_idx, 5] += 1 # 정상횟수 증가
+                            if new_lv > 7: df.iloc[q_idx, 2] += 1 # 최종 정답횟수 증가
+                            conn.update(spreadsheet=st.secrets["gsheets_url"], data=df)
+                        except: pass
                     if new_lv > 7:
-                        if is_pc:
-                            try: df.iloc[q_idx, 2] += 1; conn.update(spreadsheet=st.secrets["gsheets_url"], data=df)
-                            except: pass
                         if q_idx in st.session_state.q_levels: del st.session_state.q_levels[q_idx]
                     else:
                         st.session_state.q_levels[q_idx] = new_lv
@@ -145,7 +142,10 @@ if df is not None:
             with c3:
                 if st.button("너무 쉬움/졸업"):
                     if is_pc:
-                        try: df.iloc[q_idx, 2] += 1; conn.update(spreadsheet=st.secrets["gsheets_url"], data=df)
+                        try:
+                            df.iloc[q_idx, 2] += 1 # 정답횟수 증가
+                            df.iloc[q_idx, 6] += 1 # 쉬움횟수 증가
+                            conn.update(spreadsheet=st.secrets["gsheets_url"], data=df)
                         except: pass
                     if q_idx in st.session_state.q_levels: del st.session_state.q_levels[q_idx]
                     st.session_state.solve_count += 1
@@ -156,22 +156,14 @@ if df is not None:
         st.markdown(f'<div class="progress-container"><div class="bar-mastered" style="width:{(m_q/tot)*100}%"></div><div class="bar-review" style="width:{(r_q/tot)*100}%"></div><div class="bar-new" style="width:{(n_q/tot)*100}%"></div></div>', unsafe_allow_html=True)
         st.markdown(f'<div style="display:flex; justify-content:space-between; padding:10px;"><p>✅정복:{m_q}</p><p>🔥복습:{r_q}</p><p>🆕남은새문제:{n_q}</p></div>', unsafe_allow_html=True)
 
-# 8. 단축키 엔진 (1, 2 지원)
+# 8. 단축키 엔진
 components.html("""
     <script>
     const doc = window.parent.document;
     doc.addEventListener('keydown', function(e) {
-        if (e.code === 'Space') {
-            e.preventDefault();
-            const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('확인') || el.innerText.includes('시작'));
-            if (btn) btn.click();
-        } else if (e.key === '1') {
-            const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('어려움'));
-            if (btn) btn.click();
-        } else if (e.key === '2') {
-            const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('정상'));
-            if (btn) btn.click();
-        }
+        if (e.code === 'Space') { e.preventDefault(); const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('확인') || el.innerText.includes('시작')); if (btn) btn.click(); }
+        else if (e.key === '1') { const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('어려움')); if (btn) btn.click(); }
+        else if (e.key === '2') { const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('정상')); if (btn) btn.click(); }
     });
     </script>
 """, height=0)
