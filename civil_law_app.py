@@ -15,7 +15,7 @@ if 'q_levels' not in st.session_state: st.session_state.q_levels = {}
 if 'q_wrong_levels' not in st.session_state: st.session_state.q_wrong_levels = {}
 if 'schedules' not in st.session_state: st.session_state.schedules = {} 
 if 'solve_count' not in st.session_state: st.session_state.solve_count = 0
-if 'last_msg' not in st.session_state: st.session_state.last_msg = "너무 쉬운 문제는 즉시 졸업 시킵니다!"
+if 'last_msg' not in st.session_state: st.session_state.last_msg = "데이터 동기화 준비 완료."
 
 # 3. 디자인 설정 (와이드 게이지 한 줄 고정)
 st.markdown("""
@@ -40,6 +40,11 @@ st.markdown("""
     .answer-text { font-size: 4.0rem !important; font-weight: bold; color: #2ecc71; text-align: center; margin: 25px 0; line-height: 1.3; }
     
     div.stButton > button { width: 100% !important; height: 110px !important; font-size: 1.8rem !important; font-weight: bold !important; border-radius: 30px !important; color: white !important; background-color: #34495e !important; border: 2px solid #555 !important; }
+    
+    /* 동기화 버튼 스타일 (상단 우측 배치용) */
+    .sync-container { display: flex; justify-content: flex-end; margin-bottom: -50px; }
+    .stButton > button.sync-btn { height: 45px !important; width: auto !important; font-size: 1rem !important; padding: 0 20px !important; background-color: #1e293b !important; }
+
     .progress-container { width: 100%; background-color: #222; border-radius: 10px; margin-top: 150px; display: flex; height: 18px; overflow: hidden; border: 1px solid #444; }
     .bar-mastered { background-color: #2ecc71; } .bar-review { background-color: #e74c3c; } .bar-new { background-color: #3498db; }
 </style>
@@ -60,15 +65,15 @@ def load_data():
         return df
     except: return None
 
-if 'df' not in st.session_state: st.session_state.df = load_data()
-df = st.session_state.df
+# 동기화 로직: 세션에 데이터가 없거나 동기화 버튼을 누르면 캐시를 비우고 다시 로드
+if 'df' not in st.session_state:
+    st.session_state.df = load_data()
 
 # 5. 출제 로직 (50% 신규 보장)
 def get_next_question(dataframe):
     curr_cnt = st.session_state.solve_count
     all_scheduled = [idx for sublist in st.session_state.schedules.values() for idx in sublist]
     
-    # 정답횟수 5회 미만인 것들만 후보
     available_new = [i for i in range(len(dataframe)) if int(dataframe.iloc[i]['정답횟수']) < 5 and i not in all_scheduled]
     pending_keys = sorted([k for k in st.session_state.schedules.keys() if k <= curr_cnt and st.session_state.schedules[k]])
     
@@ -82,7 +87,18 @@ def get_next_question(dataframe):
     return "GRADUATED"
 
 # --- 6. 메인 화면 ---
+df = st.session_state.df
+
 if df is not None:
+    # 상단 레이아웃 (제목과 동기화 버튼)
+    t_col1, t_col2 = st.columns([8, 2])
+    with t_col2:
+        if st.button("🔄 데이터 동기화", key="sync_btn"):
+            st.cache_data.clear()
+            st.session_state.df = load_data()
+            st.session_state.last_msg = "최신 데이터를 성공적으로 수신했습니다!"
+            st.rerun()
+
     if isinstance(st.session_state.current_index, int) and st.session_state.current_index >= len(df):
         st.session_state.current_index = get_next_question(df)
 
@@ -148,7 +164,6 @@ if df is not None:
             with c3:
                 if st.button("너무 쉬움"):
                     st.session_state.last_msg = "🎊 정복 완료! 이제 이 문제는 졸업입니다."
-                    # [핵심] 너무 쉬우면 즉시 5점으로 만들어 졸업시킴
                     df.at[q_idx, '정답횟수'] = 5; df.at[q_idx, '쉬움횟수'] += 1
                     try: conn.update(spreadsheet=st.secrets["gsheets_url"], data=df)
                     except: pass
