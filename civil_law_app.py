@@ -15,9 +15,9 @@ if 'q_levels' not in st.session_state: st.session_state.q_levels = {}
 if 'q_wrong_levels' not in st.session_state: st.session_state.q_wrong_levels = {}
 if 'schedules' not in st.session_state: st.session_state.schedules = {} 
 if 'solve_count' not in st.session_state: st.session_state.solve_count = 0
-if 'last_msg' not in st.session_state: st.session_state.last_msg = "충분한 시각적 여백을 확보했습니다. 훈련에 집중하세요!"
+if 'last_msg' not in st.session_state: st.session_state.last_msg = "버튼 및 레이아웃 최적화 완료."
 
-# 3. 디자인 설정 (여백 12cm 반영 및 반응형 CSS)
+# 3. 디자인 설정 (동기화 버튼 축소 및 하단 여백 3cm 적용)
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700&display=swap');
@@ -38,7 +38,7 @@ st.markdown("""
     .question-text { font-size: clamp(1.4rem, 4vw, 3.2rem) !important; font-weight: bold; color: #f1c40f; text-align: center; margin: 25px 0; line-height: 1.3; }
     .answer-text { font-size: clamp(1.6rem, 5vw, 3.8rem) !important; font-weight: bold; color: #2ecc71; text-align: center; margin: 25px 0; line-height: 1.3; }
     
-    /* 버튼 사이즈 축소 및 스타일 */
+    /* [기본] 하단 액션 버튼 3개 스타일 (크게 유지) */
     div.stButton > button { 
         width: 100% !important; 
         height: clamp(55px, 8vh, 75px) !important; 
@@ -50,22 +50,30 @@ st.markdown("""
         border: 1px solid #334155 !important; 
     }
 
-    /* [핵심] 하단 그래프 여백 설정 (12cm ≈ 450px) */
+    /* [수정] 상단 우측 '데이터 동기화' 버튼만 타겟팅하여 1/2 사이즈로 축소 */
+    [data-testid="stVerticalBlock"] > [style*="flex-direction: row"] > div:nth-child(2) .stButton > button {
+        width: auto !important;
+        height: 40px !important; /* 기존 약 75px의 절반 수준 */
+        min-height: 40px !important;
+        font-size: 0.9rem !important;
+        padding: 0 15px !important;
+        margin-top: 5px !important;
+    }
+
+    /* [수정] 하단 그래프 여백 설정 (약 3cm ≈ 120px) */
     .progress-container { 
         width: 100%; 
         background-color: #222; 
         border-radius: 10px; 
-        margin-top: 450px; /* PC용 여백 */
+        margin-top: 120px; /* PC 기준 약 3cm 여백 적용 */
         display: flex; 
         height: 12px; 
         overflow: hidden; 
     }
 
-    /* 모바일 기기용 여백 조정 (미디어 쿼리) */
+    /* 모바일에서는 여백을 줄임 */
     @media (max-width: 600px) {
-        .progress-container {
-            margin-top: 50px; /* 모바일은 좁은 여백 유지 */
-        }
+        .progress-container { margin-top: 40px; }
     }
     
     .bar-mastered { background-color: #2ecc71; } 
@@ -113,6 +121,7 @@ if df is not None:
     # 상단 툴바 (제목 + 동기화)
     t_col1, t_col2 = st.columns([7, 3])
     with t_col2:
+        # 이 버튼은 CSS에 의해 작게 표시됩니다.
         if st.button("🔄 데이터 동기화", key="sync_btn"):
             st.cache_data.clear()
             st.session_state.df = load_data()
@@ -157,6 +166,7 @@ if df is not None:
             q_idx = st.session_state.current_index
             st.markdown(f'<p class="answer-text">A. {row["정답"]}</p>', unsafe_allow_html=True)
             
+            # 하단 액션 버튼 (CSS에 의해 크게 표시됩니다)
             c1, c2, c3 = st.columns(3)
             with c1:
                 if st.button("어려움 (1/Ctrl)"):
@@ -188,10 +198,10 @@ if df is not None:
                     if q_idx in st.session_state.q_levels: del st.session_state.q_levels[q_idx]
                     st.session_state.solve_count += 1; st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
 
-        # [여백이 적용된 하단 바]
+        # [여백이 3cm로 조정된 하단 바]
         tot = len(df); m_q = len(df[df['정답횟수'] >= 5]); r_q = len(st.session_state.q_levels); n_q = tot - m_q - r_q
         st.markdown(f'<div class="progress-container"><div class="bar-mastered" style="width:{(m_q/tot)*100}%"></div><div class="bar-review" style="width:{(r_q/tot)*100}%"></div><div class="bar-new" style="width:{(n_q/tot)*100}%"></div></div>', unsafe_allow_html=True)
-        st.markdown(f'<div style="display:flex; justify-content:space-between; padding:5px; font-size:0.8rem;"><p>✅정복:{m_q}</p><p>🔥복습:{r_q}</p><p>🆕남은새문제:{n_q}</p></div>', unsafe_allow_html=True)
+        st.markdown(f'<div style="display:flex; justify-content:space-between; padding:5px; font-size:0.8rem;"><p>✅정복:{m_q}</p><p>🔥복습:{r_q}</p><p>🆕신규:{n_q}</p></div>', unsafe_allow_html=True)
 
 # 7. 단축키 엔진
 components.html("""<script>const doc = window.parent.document;doc.addEventListener('keydown', function(e) {if (e.code === 'Space') { e.preventDefault(); const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('확인') || el.innerText.includes('시작')); if (btn) btn.click(); }else if (e.key === 'Control' || e.key === '1') { const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('어려움')); if (btn) btn.click(); }else if (e.key === 'Alt' || e.key === '2') { e.preventDefault(); const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('정상')); if (btn) btn.click(); }else if (e.key === '3') { const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('쉬움')); if (btn) btn.click(); }});</script>""", height=0)
