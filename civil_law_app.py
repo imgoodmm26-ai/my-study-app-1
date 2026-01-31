@@ -21,41 +21,44 @@ if 'last_msg' not in st.session_state: st.session_state.last_msg = "데이터 �
 st.markdown("""
 <style>
     .stApp { background-color: black; color: white; }
-    .feedback-text { font-size: 1.1rem !important; color: #00d4ff; font-weight: bold; text-align: center; margin-bottom: 5px; height: 30px; }
-    .status-badge { font-size: 0.9rem; font-weight: bold; padding: 3px 10px; border-radius: 12px; margin-bottom: 5px; display: inline-block; }
+    .feedback-text { font-size: 1.2rem !important; color: #00d4ff; font-weight: bold; text-align: center; margin-bottom: 5px; height: 35px; }
+    .status-badge { font-size: 0.9rem; font-weight: bold; padding: 4px 12px; border-radius: 15px; margin-bottom: 10px; display: inline-block; }
     .badge-new { background-color: #f1c40f; color: black; }
     .badge-review { background-color: #3498db; color: white; }
     
-    /* 게이지 기본 설정 (PC) */
-    .dual-gauge-container { display: flex; flex-direction: column; align-items: center; margin-bottom: 20px; width: 100%; }
-    .gauge-row { font-size: 2.0rem; font-family: 'Courier New', monospace; display: flex; align-items: center; justify-content: center; white-space: nowrap; overflow: hidden; width: 100%; }
+    /* [PC 기본] 게이지 와이드 설정 */
+    .dual-gauge-container { display: flex; flex-direction: column; align-items: center; margin-bottom: 25px; width: 100%; }
+    .gauge-row { 
+        font-size: 2.2rem; font-family: 'Courier New', monospace; 
+        display: flex; align-items: center; justify-content: center;
+        white-space: nowrap; overflow: hidden; width: 100%; 
+    }
     .wrong-side { color: #e74c3c; text-align: right; width: 450px; letter-spacing: 1px; }
     .correct-side { color: #9b59b6; text-align: left; width: 450px; letter-spacing: 1px; }
-    .center-line { color: #555; font-weight: bold; font-size: 2.2rem; margin: 0 15px; }
+    .center-line { color: #555; font-weight: bold; font-size: 2.5rem; margin: 0 15px; }
     
-    .question-text { font-size: 3.0rem !important; font-weight: bold; color: #f1c40f; text-align: center; margin: 20px 0; line-height: 1.2; }
-    .answer-text { font-size: 3.2rem !important; font-weight: bold; color: #2ecc71; text-align: center; margin: 20px 0; line-height: 1.2; }
+    .question-text { font-size: 3.0rem !important; font-weight: bold; color: #f1c40f; text-align: center; margin: 20px 0; line-height: 1.3; }
+    .answer-text { font-size: 3.5rem !important; font-weight: bold; color: #2ecc71; text-align: center; margin: 20px 0; line-height: 1.3; }
     
-    /* [PC 모드] 버튼 크기 2/3 축소 */
+    /* [PC 모드] 버튼 크기 2/3 축소 (110px -> 75px) */
     div.stButton > button { 
-        width: 100% !important; 
-        height: 75px !important; /* 110px -> 75px (2/3) */
-        font-size: 1.2rem !important; /* 1.8rem -> 1.2rem (2/3) */
-        font-weight: bold !important; border-radius: 20px !important; 
-        color: white !important; background-color: #34495e !important; border: 2px solid #555 !important; 
+        width: 100% !important; height: 75px !important; 
+        font-size: 1.2rem !important; font-weight: bold !important; 
+        border-radius: 20px !important; color: white !important; 
+        background-color: #34495e !important; border: 2px solid #555 !important; 
     }
     
-    .progress-container { width: 100%; background-color: #222; border-radius: 10px; margin-top: 80px; display: flex; height: 16px; overflow: hidden; border: 1px solid #444; }
+    .progress-container { width: 100%; background-color: #222; border-radius: 10px; margin-top: 100px; display: flex; height: 18px; overflow: hidden; border: 1px solid #444; }
 
-    /* [모바일 모드] 600px 이하 최적화 */
+    /* [반응형] 모바일 최적화 (600px 이하) */
     @media (max-width: 600px) {
-        .question-text { font-size: 1.7rem !important; margin: 10px 0 !important; }
-        .answer-text { font-size: 1.9rem !important; margin: 10px 0 !important; }
-        .wrong-side, .correct-side { width: 42vw !important; font-size: 1.1rem !important; }
-        .center-line { font-size: 1.4rem !important; margin: 0 5px !important; }
+        .question-text { font-size: 1.8rem !important; margin: 15px 0 !important; }
+        .answer-text { font-size: 2.0rem !important; margin: 15px 0 !important; }
+        .wrong-side, .correct-side { width: 42vw !important; font-size: 1.2rem !important; }
+        .center-line { font-size: 1.5rem !important; margin: 0 5px !important; }
         div.stButton > button { height: 65px !important; font-size: 1.1rem !important; border-radius: 15px !important; }
-        .progress-container { margin-top: 30px !important; }
-        .feedback-text { font-size: 0.9rem !important; height: 25px; }
+        .progress-container { margin-top: 40px !important; }
+        .feedback-text { font-size: 1.0rem !important; height: 25px; }
     }
 
     .bar-mastered { background-color: #2ecc71; } .bar-review { background-color: #e74c3c; } .bar-new { background-color: #3498db; }
@@ -79,7 +82,6 @@ def load_data():
 
 if 'df' not in st.session_state:
     st.session_state.df = load_data()
-df = st.session_state.df
 
 # 5. 출제 로직 (50% 신규 보장)
 def get_next_question(dataframe):
@@ -98,14 +100,16 @@ def get_next_question(dataframe):
     return "GRADUATED"
 
 # --- 6. 메인 화면 ---
+df = st.session_state.df
+
 if df is not None:
-    # 상단 툴바 (동기화 버튼)
+    # 상단 레이아웃
     t_col1, t_col2 = st.columns([8, 2])
     with t_col2:
         if st.button("🔄 동기화", key="sync_btn"):
             st.cache_data.clear()
             st.session_state.df = load_data()
-            st.session_state.last_msg = "최신 데이터 수신 완료!"
+            st.session_state.last_msg = "최신 데이터 수신 성공!"
             st.rerun()
 
     if isinstance(st.session_state.current_index, int) and st.session_state.current_index >= len(df):
@@ -116,7 +120,7 @@ if df is not None:
         st.markdown(f'<p class="feedback-text">{st.session_state.last_msg}</p>', unsafe_allow_html=True)
         
         if st.session_state.current_index == "GRADUATED":
-            st.markdown('<p class="question-text">🎊 모든 문항 정복 완료! 🎊</p>', unsafe_allow_html=True)
+            st.markdown('<p class="question-text">🎊 MISSION COMPLETE! 🎊</p>', unsafe_allow_html=True)
             if st.button("처음부터 다시 시작하기"):
                 st.session_state.q_levels = {}; st.session_state.q_wrong_levels = {}; st.session_state.schedules = {}; st.session_state.solve_count = 0
                 st.session_state.state = "IDLE"; st.session_state.current_index = None; st.rerun()
@@ -150,7 +154,7 @@ if df is not None:
             with c1:
                 if st.button("어려움 (1/Ctrl)"):
                     st.session_state.q_wrong_levels[q_idx] = st.session_state.q_wrong_levels.get(q_idx, 0) + 1
-                    st.session_state.q_levels[q_idx] = 1; df.at[q_idx, '오답횟수'] += 1; df.at[q_idx, '어려움횟수'] += 1
+                    st.session_state.q_levels[q_idx] = 1; df.at[q_idx, '오답횟수'] += 1
                     try: conn.update(spreadsheet=st.secrets["gsheets_url"], data=df)
                     except: pass
                     target = st.session_state.solve_count + 5; st.session_state.schedules.setdefault(target, []).append(q_idx)
@@ -158,7 +162,7 @@ if df is not None:
             with c2:
                 if st.button("정상 (2/Alt)"):
                     new_lv = st.session_state.q_levels.get(q_idx, 0) + 1
-                    df.at[q_idx, '정상횟수'] += 1
+                    df.at[q_idx, '정상횟수'] += 1; 
                     if new_lv > 7: df.at[q_idx, '정답횟수'] = 5; del st.session_state.q_levels[q_idx]
                     else: st.session_state.q_levels[q_idx] = new_lv; st.session_state.schedules.setdefault(st.session_state.solve_count + FIBO_GAP[new_lv], []).append(q_idx)
                     try: conn.update(spreadsheet=st.secrets["gsheets_url"], data=df)
@@ -172,10 +176,10 @@ if df is not None:
                     if q_idx in st.session_state.q_levels: del st.session_state.q_levels[q_idx]
                     st.session_state.solve_count += 1; st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
 
-        # 하단 바
+        # 하단 통합 바
         tot = len(df); m_q = len(df[df['정답횟수'] >= 5]); r_q = len(st.session_state.q_levels); n_q = tot - m_q - r_q
         st.markdown(f'<div class="progress-container"><div class="bar-mastered" style="width:{(m_q/tot)*100}%"></div><div class="bar-review" style="width:{(r_q/tot)*100}%"></div><div class="bar-new" style="width:{(n_q/tot)*100}%"></div></div>', unsafe_allow_html=True)
         st.markdown(f'<div style="display:flex; justify-content:space-between; padding:5px; font-size:0.8rem;"><p>✅{m_q}</p><p>🔥{r_q}</p><p>🆕{n_q}</p></div>', unsafe_allow_html=True)
 
 # 7. 단축키 엔진
-components.html("""<script>const doc = window.parent.document;doc.addEventListener('keydown', function(e) {if (e.code === 'Space') { e.preventDefault(); const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('확인') || el.innerText.includes('시작')); if (btn) btn.click(); }else if (e.key === 'Control' || e.key === '1') { const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('어려움')); if (btn) btn.click(); }else if (e.key === 'Alt' || e.key === '2') { e.preventDefault(); const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('정상')); if (btn) btn.click(); }});</script>""", height=0)
+components.html("""<script>const doc = window.parent.document;doc.addEventListener('keydown', function(e) {if (e.code === 'Space') { e.preventDefault(); const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('확인') || el.innerText.includes('시작')); if (btn) btn.click(); }else if (e.key === 'Control' || e.key === '1') { const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('어려움')); if (btn) btn.click(); }else if (e.key === 'Alt' || e.key === '2') { e.preventDefault(); const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('정상')); if (btn) btn.click(); }else if (e.key === '3') { const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('쉬움')); if (btn) btn.click(); }});</script>""", height=0)
