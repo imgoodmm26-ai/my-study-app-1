@@ -17,7 +17,7 @@ if 'schedules' not in st.session_state: st.session_state.schedules = {}
 if 'solve_count' not in st.session_state: st.session_state.solve_count = 0
 if 'last_msg' not in st.session_state: st.session_state.last_msg = "데이터 동기화 준비 완료."
 
-# 3. 디자인 설정 (PC 2/3 축소 및 모바일 밀착 레이아웃)
+# 3. 디자인 설정 (PC 2/3, 모바일 1/2 사이즈 최적화)
 st.markdown("""
 <style>
     .stApp { background-color: black; color: white; }
@@ -26,13 +26,9 @@ st.markdown("""
     .badge-new { background-color: #f1c40f; color: black; }
     .badge-review { background-color: #3498db; color: white; }
     
-    /* [PC 기본] 게이지 와이드 설정 */
+    /* [PC 기본] 게이지 및 버튼 (2/3 사이즈) */
     .dual-gauge-container { display: flex; flex-direction: column; align-items: center; margin-bottom: 25px; width: 100%; }
-    .gauge-row { 
-        font-size: 2.2rem; font-family: 'Courier New', monospace; 
-        display: flex; align-items: center; justify-content: center;
-        white-space: nowrap; overflow: hidden; width: 100%; 
-    }
+    .gauge-row { font-size: 2.2rem; font-family: 'Courier New', monospace; display: flex; align-items: center; justify-content: center; white-space: nowrap; overflow: hidden; width: 100%; }
     .wrong-side { color: #e74c3c; text-align: right; width: 450px; letter-spacing: 1px; }
     .correct-side { color: #9b59b6; text-align: left; width: 450px; letter-spacing: 1px; }
     .center-line { color: #555; font-weight: bold; font-size: 2.5rem; margin: 0 15px; }
@@ -40,7 +36,7 @@ st.markdown("""
     .question-text { font-size: 3.0rem !important; font-weight: bold; color: #f1c40f; text-align: center; margin: 20px 0; line-height: 1.3; }
     .answer-text { font-size: 3.5rem !important; font-weight: bold; color: #2ecc71; text-align: center; margin: 20px 0; line-height: 1.3; }
     
-    /* [PC 모드] 버튼 크기 2/3 축소 (110px -> 75px) */
+    /* PC 버튼: 110px의 2/3인 75px */
     div.stButton > button { 
         width: 100% !important; height: 75px !important; 
         font-size: 1.2rem !important; font-weight: bold !important; 
@@ -50,22 +46,25 @@ st.markdown("""
     
     .progress-container { width: 100%; background-color: #222; border-radius: 10px; margin-top: 100px; display: flex; height: 18px; overflow: hidden; border: 1px solid #444; }
 
-    /* [반응형] 모바일 최적화 (600px 이하) */
+    /* [반응형] 모바일 최적화: 버튼 크기 1/2로 과감히 축소 */
     @media (max-width: 600px) {
-        .question-text { font-size: 1.8rem !important; margin: 15px 0 !important; }
-        .answer-text { font-size: 2.0rem !important; margin: 15px 0 !important; }
-        .wrong-side, .correct-side { width: 42vw !important; font-size: 1.2rem !important; }
-        .center-line { font-size: 1.5rem !important; margin: 0 5px !important; }
-        div.stButton > button { height: 65px !important; font-size: 1.1rem !important; border-radius: 15px !important; }
-        .progress-container { margin-top: 40px !important; }
-        .feedback-text { font-size: 1.0rem !important; height: 25px; }
+        .question-text { font-size: 1.6rem !important; margin: 10px 0 !important; }
+        .answer-text { font-size: 1.8rem !important; margin: 10px 0 !important; }
+        .wrong-side, .correct-side { width: 42vw !important; font-size: 1.1rem !important; }
+        .center-line { font-size: 1.3rem !important; margin: 0 5px !important; }
+        
+        /* 모바일 버튼: 약 1/2 사이즈인 50px로 조정 */
+        div.stButton > button { height: 50px !important; font-size: 0.95rem !important; border-radius: 12px !important; }
+        
+        .progress-container { margin-top: 30px !important; }
+        .feedback-text { font-size: 0.9rem !important; height: 25px; }
     }
 
     .bar-mastered { background-color: #2ecc71; } .bar-review { background-color: #e74c3c; } .bar-new { background-color: #3498db; }
 </style>
 """, unsafe_allow_html=True)
 
-# 4. 데이터 로드
+# 4. 데이터 로드 (nan 방지 로직 포함)
 conn = st.connection("gsheets", type=GSheetsConnection)
 @st.cache_data(ttl=1)
 def load_data():
@@ -74,7 +73,8 @@ def load_data():
         df_raw = conn.read(spreadsheet=url, worksheet=0)
         df = df_raw.iloc[:, :7]
         df.columns = ['질문', '정답', '정답횟수', '오답횟수', '어려움횟수', '정상횟수', '쉬움횟수']
-        df = df.dropna(subset=['질문']).reset_index(drop=True)
+        # [핵심] nan 제거로 에러 방지
+        df = df.dropna(subset=['질문']).reset_index(drop=True) 
         for col in ['정답횟수', '오답횟수', '어려움횟수', '정상횟수', '쉬움횟수']:
             df[col] = pd.to_numeric(df[col]).fillna(0).astype(int)
         return df
@@ -82,8 +82,9 @@ def load_data():
 
 if 'df' not in st.session_state:
     st.session_state.df = load_data()
+df = st.session_state.df
 
-# 5. 출제 로직 (50% 신규 보장)
+# 5. 출제 로직 (50% 신규 보급 유지)
 def get_next_question(dataframe):
     curr_cnt = st.session_state.solve_count
     all_scheduled = [idx for sublist in st.session_state.schedules.values() for idx in sublist]
@@ -100,10 +101,8 @@ def get_next_question(dataframe):
     return "GRADUATED"
 
 # --- 6. 메인 화면 ---
-df = st.session_state.df
-
 if df is not None:
-    # 상단 레이아웃
+    # 동기화 버튼 영역
     t_col1, t_col2 = st.columns([8, 2])
     with t_col2:
         if st.button("🔄 동기화", key="sync_btn"):
@@ -120,7 +119,7 @@ if df is not None:
         st.markdown(f'<p class="feedback-text">{st.session_state.last_msg}</p>', unsafe_allow_html=True)
         
         if st.session_state.current_index == "GRADUATED":
-            st.markdown('<p class="question-text">🎊 MISSION COMPLETE! 🎊</p>', unsafe_allow_html=True)
+            st.markdown('<p class="question-text">🎊 모든 문항 정복 완료! 🎊</p>', unsafe_allow_html=True)
             if st.button("처음부터 다시 시작하기"):
                 st.session_state.q_levels = {}; st.session_state.q_wrong_levels = {}; st.session_state.schedules = {}; st.session_state.solve_count = 0
                 st.session_state.state = "IDLE"; st.session_state.current_index = None; st.rerun()
@@ -162,7 +161,7 @@ if df is not None:
             with c2:
                 if st.button("정상 (2/Alt)"):
                     new_lv = st.session_state.q_levels.get(q_idx, 0) + 1
-                    df.at[q_idx, '정상횟수'] += 1; 
+                    df.at[q_idx, '정상횟수'] += 1
                     if new_lv > 7: df.at[q_idx, '정답횟수'] = 5; del st.session_state.q_levels[q_idx]
                     else: st.session_state.q_levels[q_idx] = new_lv; st.session_state.schedules.setdefault(st.session_state.solve_count + FIBO_GAP[new_lv], []).append(q_idx)
                     try: conn.update(spreadsheet=st.secrets["gsheets_url"], data=df)
