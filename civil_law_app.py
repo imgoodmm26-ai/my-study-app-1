@@ -15,61 +15,45 @@ if 'q_levels' not in st.session_state: st.session_state.q_levels = {}
 if 'q_wrong_levels' not in st.session_state: st.session_state.q_wrong_levels = {}
 if 'schedules' not in st.session_state: st.session_state.schedules = {} 
 if 'solve_count' not in st.session_state: st.session_state.solve_count = 0
-if 'last_msg' not in st.session_state: st.session_state.last_msg = "기기 맞춤형 인터페이스를 가동합니다."
+if 'last_msg' not in st.session_state: st.session_state.last_msg = "기기 맞춤형 레이아웃 가동 중."
 
-# 3. [핵심] 미디어 쿼리를 활용한 반응형 CSS
+# 3. 디자인 설정 (반응형 CSS 추가)
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Noto+Sans+KR:wght@400;700&display=swap');
+    .stApp { background-color: black; color: white; }
+    .feedback-text { font-size: 1.2rem !important; color: #00d4ff; font-weight: bold; text-align: center; margin-bottom: 5px; height: 35px; }
+    .status-badge { font-size: 1rem; font-weight: bold; padding: 4px 12px; border-radius: 15px; margin-bottom: 10px; display: inline-block; }
+    .badge-new { background-color: #f1c40f; color: black; }
+    .badge-review { background-color: #3498db; color: white; }
     
-    .stApp { background: #020617; color: #f8fafc; font-family: 'Noto Sans KR', sans-serif; }
+    /* 기본 와이드 설정 (PC) */
+    .dual-gauge-container { display: flex; flex-direction: column; align-items: center; margin-bottom: 35px; width: 100%; }
+    .gauge-row { font-size: 2.2rem; font-family: 'Courier New', monospace; display: flex; align-items: center; justify-content: center; white-space: nowrap; overflow: hidden; width: 100%; }
+    .wrong-side { color: #e74c3c; text-align: right; width: 450px; letter-spacing: 1px; }
+    .correct-side { color: #9b59b6; text-align: left; width: 450px; letter-spacing: 1px; }
+    .center-line { color: #555; font-weight: bold; font-size: 2.5rem; margin: 0 15px; }
     
-    /* 기본 카드 (PC용) */
-    .cosmic-card {
-        background: rgba(15, 23, 42, 0.9);
-        border: 1px solid #0ea5e9;
-        border-radius: 20px;
-        padding: 40px;
-        box-shadow: 0 0 25px rgba(14, 165, 233, 0.2);
-        text-align: center;
-        margin: 20px 0;
-        min-height: 350px;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-    }
+    .question-text { font-size: 3.5rem !important; font-weight: bold; color: #f1c40f; text-align: center; margin: 25px 0; line-height: 1.3; }
+    .answer-text { font-size: 4.0rem !important; font-weight: bold; color: #2ecc71; text-align: center; margin: 25px 0; line-height: 1.3; }
+    div.stButton > button { width: 100% !important; height: 110px !important; font-size: 1.8rem !important; font-weight: bold !important; border-radius: 30px !important; color: white !important; background-color: #34495e !important; border: 2px solid #555 !important; }
+    .progress-container { width: 100%; background-color: #222; border-radius: 10px; margin-top: 150px; display: flex; height: 18px; overflow: hidden; border: 1px solid #444; }
 
-    .question-text { font-size: 3.2rem !important; font-weight: 700; color: #facc15; line-height: 1.4; }
-    .answer-text { font-size: 3.5rem !important; font-weight: 700; color: #22c55e; line-height: 1.4; }
-
-    /* 게이지 공통 스타일 */
-    .dual-gauge-container { display: flex; flex-direction: column; align-items: center; width: 100%; margin: 20px 0; }
-    .gauge-row { display: flex; align-items: center; justify-content: center; white-space: nowrap; font-family: 'Courier New', monospace; }
-    .wrong-side { color: #ef4444; text-align: right; width: 450px; font-size: 2.2rem; }
-    .correct-side { color: #a855f7; text-align: left; width: 450px; font-size: 2.2rem; }
-    .center-line { color: #475569; font-weight: bold; margin: 0 15px; font-size: 2.5rem; }
-
-    /* [반응형] 모바일 화면 최적화 (600px 이하) */
+    /* [반응형 핵심] 모바일 최적화 (600px 이하) */
     @media (max-width: 600px) {
-        .cosmic-card { min-height: 200px; padding: 20px; margin: 10px 0; border-radius: 12px; }
-        .question-text { font-size: 1.6rem !important; }
-        .answer-text { font-size: 1.8rem !important; }
-        .wrong-side, .correct-side { width: 40vw !important; font-size: 1.2rem !important; } /* 게이지 축소 */
-        .center-line { font-size: 1.5rem !important; margin: 0 5px; }
-        div.stButton > button { height: 75px !important; font-size: 1.2rem !important; }
-        .progress-container { margin-top: 30px !important; } /* 하단바 밀착 */
+        .question-text { font-size: 1.8rem !important; margin: 15px 0 !important; }
+        .answer-text { font-size: 2.0rem !important; margin: 15px 0 !important; }
+        .wrong-side, .correct-side { width: 42vw !important; font-size: 1.2rem !important; } /* 게이지 폭을 화면에 맞게 */
+        .center-line { font-size: 1.5rem !important; margin: 0 5px !important; }
+        div.stButton > button { height: 80px !important; font-size: 1.2rem !important; border-radius: 20px !important; }
+        .progress-container { margin-top: 40px !important; } /* 하단바를 위로 밀착 */
+        .feedback-text { font-size: 1.0rem !important; }
     }
 
-    div.stButton > button { 
-        width: 100% !important; height: 100px !important; 
-        font-family: 'Orbitron', sans-serif !important; border-radius: 12px !important;
-        background: #1e293b !important; color: white !important; border: 1px solid #334155 !important;
-    }
-    .status-badge { background: #0ea5e9; color: white; padding: 4px 12px; border-radius: 20px; font-size: 0.9rem; font-family: 'Orbitron'; margin-bottom: 15px; display: inline-block; }
+    .bar-mastered { background-color: #2ecc71; } .bar-review { background-color: #e74c3c; } .bar-new { background-color: #3498db; }
 </style>
 """, unsafe_allow_html=True)
 
-# 4. 데이터 로드 및 동기화
+# 4. 데이터 로드
 conn = st.connection("gsheets", type=GSheetsConnection)
 @st.cache_data(ttl=1)
 def load_data():
@@ -84,16 +68,8 @@ def load_data():
         return df
     except: return None
 
-# [동기화 버튼] 상단 배치
-t_col1, t_col2 = st.columns([8, 2])
-with t_col2:
-    if st.button("🔄 SYNC"):
-        st.cache_data.clear()
-        st.session_state.df = load_data()
-        st.rerun()
-
-if 'df' not in st.session_state: st.session_state.df = load_data()
-df = st.session_state.df
+if 'df' not in st.session_state:
+    st.session_state.df = load_data()
 
 # 5. 출제 로직 (50% 신규 보장)
 def get_next_question(dataframe):
@@ -107,25 +83,38 @@ def get_next_question(dataframe):
         else: return st.session_state.schedules[pending_keys[0]].pop(0)
     if available_new: return random.choice(available_new)
     if pending_keys: return st.session_state.schedules[pending_keys[0]].pop(0)
+    future_keys = sorted([k for k in st.session_state.schedules.keys() if k > curr_cnt and st.session_state.schedules[k]])
+    if future_keys: return st.session_state.schedules[future_keys[0]].pop(0)
     return "GRADUATED"
 
-# --- 6. 화면 구성 ---
+# --- 6. 메인 화면 ---
+df = st.session_state.df
+
 if df is not None:
+    t_col1, t_col2 = st.columns([8, 2])
+    with t_col2:
+        if st.button("🔄 동기화", key="sync_btn"):
+            st.cache_data.clear()
+            st.session_state.df = load_data()
+            st.session_state.last_msg = "최신 데이터 수신 완료!"
+            st.rerun()
+
     if isinstance(st.session_state.current_index, int) and st.session_state.current_index >= len(df):
         st.session_state.current_index = get_next_question(df)
 
     _, col, _ = st.columns([1, 10, 1])
     with col:
-        st.markdown(f'<p style="text-align:center; color:#94a3b8; font-size:0.9rem;">{st.session_state.last_msg}</p>', unsafe_allow_html=True)
+        st.markdown(f'<p class="feedback-text">{st.session_state.last_msg}</p>', unsafe_allow_html=True)
         
         if st.session_state.current_index == "GRADUATED":
-            st.markdown('<div class="cosmic-card"><p class="question-text">MISSION COMPLETE</p></div>', unsafe_allow_html=True)
-            if st.button("RESTART"):
-                st.session_state.q_levels = {}; st.session_state.solve_count = 0; st.session_state.state = "IDLE"; st.rerun()
+            st.markdown('<p class="question-text">🎊 모든 문항 정복 완료! 🎊</p>', unsafe_allow_html=True)
+            if st.button("처음부터 다시 시작하기"):
+                st.session_state.q_levels = {}; st.session_state.q_wrong_levels = {}; st.session_state.schedules = {}; st.session_state.solve_count = 0
+                st.session_state.state = "IDLE"; st.session_state.current_index = None; st.rerun()
 
         elif st.session_state.state == "IDLE":
-            st.markdown('<div class="cosmic-card"><p class="question-text">READY?</p></div>', unsafe_allow_html=True)
-            if st.button("START MISSION (Space)"):
+            st.markdown('<p class="question-text">인출 시스템</p>', unsafe_allow_html=True)
+            if st.button("훈련 시작 하기 (Space)"):
                 st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
 
         elif st.session_state.state == "QUESTION":
@@ -133,43 +122,55 @@ if df is not None:
             c_lv = st.session_state.q_levels.get(st.session_state.current_index, 0)
             w_lv = st.session_state.q_wrong_levels.get(st.session_state.current_index, 0)
             
-            # 게이지 렌더링
+            label = f'<div style="text-align:center;"><span class="status-badge badge-new">🆕 신규</span></div>' if c_lv == 0 else f'<div style="text-align:center;"><span class="status-badge badge-review">🔥 Lv.{c_lv}</span></div>'
+            st.markdown(label, unsafe_allow_html=True)
+            
+            # 반응형 와이드 게이지
             w_bars = "█" * min(w_lv, 15); w_empty = "░" * (15 - len(w_bars))
             c_bars = "█" * min(c_lv, 15); c_empty = "░" * (15 - len(c_bars))
             st.markdown(f'<div class="dual-gauge-container"><div class="gauge-row"><span class="wrong-side">{w_empty}{w_bars}</span><span class="center-line">|</span><span class="correct-side">{c_bars}{c_empty}</span></div></div>', unsafe_allow_html=True)
             
-            st.markdown(f'<div class="cosmic-card"><span class="status-badge">{"🆕 NEW" if c_lv==0 else f"🔥 LV.{c_lv}"}</span><p class="question-text">{row["질문"]}</p></div>', unsafe_allow_html=True)
-            if st.button("SHOW ANSWER (Space)"): st.session_state.state = "ANSWER"; st.rerun()
+            st.markdown(f'<p class="question-text">Q. {row["질문"]}</p>', unsafe_allow_html=True)
+            if st.button("정답 확인하기 (Space)"): st.session_state.state = "ANSWER"; st.rerun()
 
         elif st.session_state.state == "ANSWER":
             row = df.iloc[st.session_state.current_index]
             q_idx = st.session_state.current_index
-            st.markdown(f'<div class="cosmic-card"><p class="answer-text">{row["정답"]}</p></div>', unsafe_allow_html=True)
+            st.markdown(f'<p class="answer-text">A. {row["정답"]}</p>', unsafe_allow_html=True)
             
             c1, c2, c3 = st.columns(3)
             with c1:
-                if st.button("HARD (1)"):
-                    st.session_state.q_levels[q_idx] = 1; df.at[q_idx, '오답횟수'] += 1; conn.update(spreadsheet=st.secrets["gsheets_url"], data=df)
-                    st.session_state.schedules.setdefault(st.session_state.solve_count + 5, []).append(q_idx)
+                if st.button("어려움 (1/Ctrl)"):
+                    st.session_state.q_wrong_levels[q_idx] = st.session_state.q_wrong_levels.get(q_idx, 0) + 1
+                    st.session_state.q_levels[q_idx] = 1
+                    df.at[q_idx, '오답횟수'] += 1; df.at[q_idx, '어려움횟수'] += 1
+                    try: conn.update(spreadsheet=st.secrets["gsheets_url"], data=df)
+                    except: pass
+                    target = st.session_state.solve_count + 5; st.session_state.schedules.setdefault(target, []).append(q_idx)
                     st.session_state.solve_count += 1; st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
             with c2:
-                if st.button("NORM (2)"):
+                if st.button("정상 (2/Alt)"):
                     new_lv = st.session_state.q_levels.get(q_idx, 0) + 1
-                    df.at[q_idx, '정상횟수'] += 1; 
-                    if new_lv > 7: df.at[q_idx, '정답횟수'] += 1; del st.session_state.q_levels[q_idx]
-                    else: st.session_state.q_levels[q_idx] = new_lv; st.session_state.schedules.setdefault(st.session_state.solve_count + FIBO_GAP[new_lv], []).append(q_idx)
-                    conn.update(spreadsheet=st.secrets["gsheets_url"], data=df)
+                    df.at[q_idx, '정상횟수'] += 1
+                    if new_lv > 7: df.at[q_idx, '정답횟수'] += 1
+                    try: conn.update(spreadsheet=st.secrets["gsheets_url"], data=df)
+                    except: pass
+                    if new_lv > 7: del st.session_state.q_levels[q_idx]
+                    else:
+                        st.session_state.q_levels[q_idx] = new_lv
+                        target = st.session_state.solve_count + FIBO_GAP[new_lv]; st.session_state.schedules.setdefault(target, []).append(q_idx)
                     st.session_state.solve_count += 1; st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
             with c3:
-                if st.button("EASY (3)"):
-                    df.at[q_idx, '정답횟수'] = 5; conn.update(spreadsheet=st.secrets["gsheets_url"], data=df)
+                if st.button("너무 쉬움 (3)"):
+                    df.at[q_idx, '정답횟수'] = 5; df.at[q_idx, '쉬움횟수'] += 1
+                    try: conn.update(spreadsheet=st.secrets["gsheets_url"], data=df)
+                    except: pass
                     if q_idx in st.session_state.q_levels: del st.session_state.q_levels[q_idx]
                     st.session_state.solve_count += 1; st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
 
-        # 하단 바 (모바일에서 여백 줄임)
         tot = len(df); m_q = len(df[df['정답횟수'] >= 5]); r_q = len(st.session_state.q_levels); n_q = tot - m_q - r_q
         st.markdown(f'<div class="progress-container"><div class="bar-mastered" style="width:{(m_q/tot)*100}%"></div><div class="bar-review" style="width:{(r_q/tot)*100}%"></div><div class="bar-new" style="width:{(n_q/tot)*100}%"></div></div>', unsafe_allow_html=True)
-        st.markdown(f'<div style="display:flex; justify-content:space-between; padding:5px; font-size:0.8rem;"><p>✅{m_q}</p><p>🔥{r_q}</p><p>🆕{n_q}</p></div>', unsafe_allow_html=True)
+        st.markdown(f'<div style="display:flex; justify-content:space-between; padding:10px; font-size:0.8rem;"><p>✅{m_q}</p><p>🔥{r_q}</p><p>🆕{n_q}</p></div>', unsafe_allow_html=True)
 
 # 7. 단축키 엔진
-components.html("""<script>const doc = window.parent.document;doc.addEventListener('keydown', function(e) {if (e.code === 'Space') { e.preventDefault(); const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('Space')); if (btn) btn.click(); }else if (e.key === '1') { const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('HARD')); if (btn) btn.click(); }else if (e.key === '2') { const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('NORM')); if (btn) btn.click(); }else if (e.key === '3') { const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('EASY')); if (btn) btn.click(); }});</script>""", height=0)
+components.html("""<script>const doc = window.parent.document;doc.addEventListener('keydown', function(e) {if (e.code === 'Space') { e.preventDefault(); const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('확인') || el.innerText.includes('시작')); if (btn) btn.click(); }else if (e.key === 'Control' || e.key === '1') { const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('어려움')); if (btn) btn.click(); }else if (e.key === 'Alt' || e.key === '2') { e.preventDefault(); const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('정상')); if (btn) btn.click(); }else if (e.key === '3') { const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('쉬움')); if (btn) btn.click(); }});</script>""", height=0)
