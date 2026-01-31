@@ -5,7 +5,7 @@ import random
 import streamlit.components.v1 as components
 
 # 1. 페이지 설정
-st.set_page_config(page_title="감평 와이드 인출기: PRO", layout="wide")
+st.set_page_config(page_title="감평 와이드 인출기: 커스텀 에디션", layout="wide")
 
 # 2. 세션 및 피보나치 설정
 FIBO_GAP = [0, 5, 13, 21, 34, 55, 89, 144] 
@@ -15,9 +15,9 @@ if 'q_levels' not in st.session_state: st.session_state.q_levels = {}
 if 'q_wrong_levels' not in st.session_state: st.session_state.q_wrong_levels = {}
 if 'schedules' not in st.session_state: st.session_state.schedules = {} 
 if 'solve_count' not in st.session_state: st.session_state.solve_count = 0
-if 'last_msg' not in st.session_state: st.session_state.last_msg = "충분한 시각적 여백을 확보했습니다. 훈련에 집중하세요!"
+if 'last_msg' not in st.session_state: st.session_state.last_msg = "버튼 레이아웃 최적화 완료. 훈련을 계속하세요!"
 
-# 3. 디자인 설정 (여백 12cm 및 동기화 버튼 축소 반영)
+# 3. 디자인 설정 (동기화 버튼 축소 및 12cm/3cm 여백 분리 적용)
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700&display=swap');
@@ -28,6 +28,7 @@ st.markdown("""
     .badge-new { background-color: #f1c40f; color: black; }
     .badge-review { background-color: #3498db; color: white; }
     
+    /* 듀얼 게이지 */
     .dual-gauge-container { display: flex; flex-direction: column; align-items: center; margin-bottom: 25px; width: 100%; }
     .gauge-row { font-size: 1.8rem; font-family: monospace; display: flex; align-items: center; justify-content: center; width: 100%; white-space: nowrap; }
     .wrong-side { color: #e74c3c; text-align: right; width: 40vw; max-width: 450px; }
@@ -37,7 +38,7 @@ st.markdown("""
     .question-text { font-size: clamp(1.4rem, 4vw, 3.2rem) !important; font-weight: bold; color: #f1c40f; text-align: center; margin: 25px 0; line-height: 1.3; }
     .answer-text { font-size: clamp(1.6rem, 5vw, 3.8rem) !important; font-weight: bold; color: #2ecc71; text-align: center; margin: 25px 0; line-height: 1.3; }
     
-    /* 하단 액션 버튼 3개 스타일 */
+    /* 하단 액션 버튼 3개 스타일 (2/3 사이즈 유지) */
     div.stButton > button { 
         width: 100% !important; 
         height: clamp(55px, 8vh, 75px) !important; 
@@ -49,29 +50,29 @@ st.markdown("""
         border: 1px solid #334155 !important; 
     }
 
-    /* 상단 우측 '데이터 동기화' 버튼만 1/2 사이즈로 축소 */
+    /* 상단 '데이터 동기화' 버튼만 1/2 사이즈로 축소 */
     [data-testid="stVerticalBlock"] > [style*="flex-direction: row"] > div:nth-child(2) .stButton > button {
         width: auto !important;
         height: 40px !important;
         min-height: 40px !important;
         font-size: 0.9rem !important;
-        padding: 0 15px !important;
+        padding: 0 20px !important;
         margin-top: 5px !important;
     }
 
-    /* [핵심] 하단 그래프 여백 설정 (12cm ≈ 450px) */
+    /* 하단 그래프 여백 설정 (버튼으로부터 딱 3cm ≈ 120px) */
     .progress-container { 
         width: 100%; 
         background-color: #222; 
         border-radius: 10px; 
-        margin-top: 450px; /* PC용 12cm 여백 적용 */
+        margin-top: 120px; /* 버튼과 그래프 간격 3cm */
         display: flex; 
         height: 12px; 
         overflow: hidden; 
     }
 
     @media (max-width: 600px) {
-        .progress-container { margin-top: 40px; } /* 모바일은 좁은 여백 유지 */
+        .progress-container { margin-top: 40px; } 
     }
     
     .bar-mastered { background-color: #2ecc71; } 
@@ -80,7 +81,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 4. 데이터 로드 로직 (NaN 방지 필터링 강화)
+# 4. 데이터 로드 (NaN 제거 및 인덱스 리셋)
 conn = st.connection("gsheets", type=GSheetsConnection)
 @st.cache_data(ttl=1)
 def load_data():
@@ -89,7 +90,6 @@ def load_data():
         df_raw = conn.read(spreadsheet=url, worksheet=0)
         df = df_raw.iloc[:, :7]
         df.columns = ['질문', '정답', '정답횟수', '오답횟수', '어려움횟수', '정상횟수', '쉬움횟수']
-        #
         df = df.dropna(subset=['질문', '정답']).reset_index(drop=True)
         for col in ['정답횟수', '오답횟수', '어려움횟수', '정상횟수', '쉬움횟수']:
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
@@ -100,7 +100,7 @@ if 'df' not in st.session_state:
     st.session_state.df = load_data()
 df = st.session_state.df
 
-# 5. 출제 로직 (50% 신규 보장)
+# 5. 출제 로직 (50% 신규 보장 하이브리드)
 def get_next_question(dataframe):
     curr_cnt = st.session_state.solve_count
     all_scheduled = [idx for sublist in st.session_state.schedules.values() for idx in sublist]
@@ -114,14 +114,14 @@ def get_next_question(dataframe):
     if pending_keys: return st.session_state.schedules[pending_keys[0]].pop(0)
     return "GRADUATED"
 
-# --- 6. 화면 구성 ---
+# --- 6. 메인 화면 ---
 if df is not None:
     t_col1, t_col2 = st.columns([7, 3])
     with t_col2:
         if st.button("🔄 데이터 동기화", key="sync_btn"):
             st.cache_data.clear()
             st.session_state.df = load_data()
-            st.session_state.last_msg = f"데이터 동기화 완료: {len(st.session_state.df)}문항"
+            st.session_state.last_msg = f"동기화 완료: {len(st.session_state.df)}문항 수신됨"
             st.rerun()
 
     if isinstance(st.session_state.current_index, int) and st.session_state.current_index >= len(df):
@@ -132,7 +132,7 @@ if df is not None:
         st.markdown(f'<p class="feedback-text">{st.session_state.last_msg}</p>', unsafe_allow_html=True)
         
         if st.session_state.current_index == "GRADUATED":
-            st.markdown('<p class="question-text">🎊 모든 문항 정복 완료! 🎊</p>', unsafe_allow_html=True)
+            st.markdown('<p class="question-text">🎊 MISSION COMPLETE! 🎊</p>', unsafe_allow_html=True)
             if st.button("처음부터 다시 시작하기"):
                 st.session_state.q_levels = {}; st.session_state.solve_count = 0
                 st.session_state.state = "IDLE"; st.session_state.current_index = None; st.rerun()
@@ -155,12 +155,17 @@ if df is not None:
             st.markdown(f'<div class="dual-gauge-container"><div class="gauge-row"><span class="wrong-side">{w_empty}{w_bars}</span><span class="center-line">|</span><span class="correct-side">{c_bars}{c_empty}</span></div></div>', unsafe_allow_html=True)
             
             st.markdown(f'<p class="question-text">Q. {row["질문"]}</p>', unsafe_allow_html=True)
+            # 정답 확인 버튼과 질문 사이 간격 (12cm용)
+            st.markdown('<div style="height: 330px;"></div>', unsafe_allow_html=True)
             if st.button("정답 확인 (Space)"): st.session_state.state = "ANSWER"; st.rerun()
 
         elif st.session_state.state == "ANSWER":
             row = df.iloc[st.session_state.current_index]
             q_idx = st.session_state.current_index
             st.markdown(f'<p class="answer-text">A. {row["정답"]}</p>', unsafe_allow_html=True)
+            
+            # 버튼과 정답 텍스트 사이 간격 (12cm용)
+            st.markdown('<div style="height: 330px;"></div>', unsafe_allow_html=True)
             
             c1, c2, c3 = st.columns(3)
             with c1:
@@ -192,7 +197,7 @@ if df is not None:
                     if q_idx in st.session_state.q_levels: del st.session_state.q_levels[q_idx]
                     st.session_state.solve_count += 1; st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
 
-        # [12cm 여백이 적용된 하단 바]
+        # 하단 통합 바 (버튼으로부터 딱 3cm 아래)
         tot = len(df); m_q = len(df[df['정답횟수'] >= 5]); r_q = len(st.session_state.q_levels); n_q = tot - m_q - r_q
         st.markdown(f'<div class="progress-container"><div class="bar-mastered" style="width:{(m_q/tot)*100}%"></div><div class="bar-review" style="width:{(r_q/tot)*100}%"></div><div class="bar-new" style="width:{(n_q/tot)*100}%"></div></div>', unsafe_allow_html=True)
         st.markdown(f'<div style="display:flex; justify-content:space-between; padding:5px; font-size:0.8rem;"><p>✅정복:{m_q}</p><p>🔥복습:{r_q}</p><p>🆕남은새문제:{n_q}</p></div>', unsafe_allow_html=True)
