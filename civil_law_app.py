@@ -17,7 +17,7 @@ if 'schedules' not in st.session_state: st.session_state.schedules = {}
 if 'solve_count' not in st.session_state: st.session_state.solve_count = 0
 if 'last_msg' not in st.session_state: st.session_state.last_msg = "데이터 동기화 준비 완료."
 
-# 3. 디자인 설정 (PC 2/3, 모바일 1/2 사이즈 반영)
+# 3. 디자인 설정 (PC 2/3, 모바일 1/2 사이즈 최적화)
 st.markdown("""
 <style>
     .stApp { background-color: black; color: white; }
@@ -26,7 +26,6 @@ st.markdown("""
     .badge-new { background-color: #f1c40f; color: black; }
     .badge-review { background-color: #3498db; color: white; }
     
-    /* 게이지 및 텍스트 기본 (PC 기준) */
     .dual-gauge-container { display: flex; flex-direction: column; align-items: center; margin-bottom: 25px; width: 100%; }
     .gauge-row { font-size: 1.8rem; font-family: 'Courier New', monospace; display: flex; align-items: center; justify-content: center; white-space: nowrap; overflow: hidden; width: 100%; }
     .wrong-side { color: #e74c3c; text-align: right; width: 450px; letter-spacing: 1px; }
@@ -36,7 +35,7 @@ st.markdown("""
     .question-text { font-size: 2.8rem !important; font-weight: bold; color: #f1c40f; text-align: center; margin: 15px 0; line-height: 1.2; }
     .answer-text { font-size: 3.0rem !important; font-weight: bold; color: #2ecc71; text-align: center; margin: 15px 0; line-height: 1.2; }
     
-    /* PC 버튼: 기존 110px -> 약 2/3인 75px로 축소 */
+    /* PC 버튼: 약 2/3 사이즈 축소 */
     div.stButton > button { 
         width: 100% !important; height: 75px !important; 
         font-size: 1.1rem !important; font-weight: bold !important; 
@@ -46,25 +45,20 @@ st.markdown("""
     
     .progress-container { width: 100%; background-color: #222; border-radius: 10px; margin-top: 80px; display: flex; height: 16px; overflow: hidden; border: 1px solid #444; }
 
-    /* [핵심] 모바일 최적화: 600px 이하일 때 밀착 및 1/2 버튼 */
     @media (max-width: 600px) {
         .question-text { font-size: 1.6rem !important; margin: 10px 0 !important; }
         .answer-text { font-size: 1.8rem !important; margin: 10px 0 !important; }
         .wrong-side, .correct-side { width: 42vw !important; font-size: 1.1rem !important; }
         .center-line { font-size: 1.4rem !important; margin: 0 5px !important; }
-        
-        /* 모바일 버튼: 기존 110px -> 약 1/2인 50px로 축소 */
+        /* 모바일 버튼: 약 1/2 사이즈 축소 */
         div.stButton > button { height: 50px !important; font-size: 0.95rem !important; border-radius: 12px !important; }
-        
         .progress-container { margin-top: 30px !important; }
-        .feedback-text { font-size: 0.9rem !important; height: 25px; }
     }
-
     .bar-mastered { background-color: #2ecc71; } .bar-review { background-color: #e74c3c; } .bar-new { background-color: #3498db; }
 </style>
 """, unsafe_allow_html=True)
 
-# 4. 데이터 로드 (기존 로직 유지)
+# 4. 데이터 로드
 conn = st.connection("gsheets", type=GSheetsConnection)
 @st.cache_data(ttl=1)
 def load_data():
@@ -79,8 +73,7 @@ def load_data():
         return df
     except: return None
 
-if 'df' not in st.session_state:
-    st.session_state.df = load_data()
+if 'df' not in st.session_state: st.session_state.df = load_data()
 df = st.session_state.df
 
 # 5. 출제 로직 (50% 신규 보장 유지)
@@ -101,11 +94,19 @@ def get_next_question(dataframe):
 
 # --- 6. 메인 화면 ---
 if df is not None:
-    # 상단 동기화 버튼 (포맷 유지)
-    t_col1, t_col2 = st.columns([8, 2])
+    # 상단 버튼 레이아웃 (동기화 + 오답노트 다운로드)
+    t_col1, t_col2, t_col3 = st.columns([5, 2.5, 2.5])
     with t_col2:
         if st.button("🔄 동기화", key="sync_btn"):
             st.cache_data.clear(); st.session_state.df = load_data(); st.rerun()
+    with t_col3:
+        # [핵심] 오답노트 추출 로직
+        diff_df = df[df['어려움횟수'] > 0].sort_values(by='어려움횟수', ascending=False)
+        if not diff_df.empty:
+            csv_data = diff_df.to_csv(index=False).encode('utf-8-sig')
+            st.download_button(label="📥 오답노트 받기", data=csv_data, file_name='my_wrong_notes.csv', mime='text/csv')
+        else:
+            st.button("📥 오답 없음", disabled=True)
 
     if isinstance(st.session_state.current_index, int) and st.session_state.current_index >= len(df):
         st.session_state.current_index = get_next_question(df)
@@ -113,51 +114,40 @@ if df is not None:
     _, col, _ = st.columns([1, 10, 1])
     with col:
         st.markdown(f'<p class="feedback-text">{st.session_state.last_msg}</p>', unsafe_allow_html=True)
-        
         if st.session_state.current_index == "GRADUATED":
             st.markdown('<p class="question-text">🎊 모든 문항 정복 완료! 🎊</p>', unsafe_allow_html=True)
             if st.button("처음부터 다시 시작하기"):
-                st.session_state.q_levels = {}; st.session_state.q_wrong_levels = {}; st.session_state.schedules = {}; st.session_state.solve_count = 0
-                st.session_state.state = "IDLE"; st.session_state.current_index = None; st.rerun()
-
+                st.session_state.q_levels = {}; st.session_state.q_wrong_levels = {}; st.session_state.schedules = {}; st.session_state.solve_count = 0; st.session_state.state = "IDLE"; st.session_state.current_index = None; st.rerun()
         elif st.session_state.state == "IDLE":
             st.markdown('<p class="question-text">인출 시스템</p>', unsafe_allow_html=True)
             if st.button("훈련 시작 하기 (Space)"):
                 st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
-
         elif st.session_state.state == "QUESTION":
             row = df.iloc[st.session_state.current_index]
             c_lv = st.session_state.q_levels.get(st.session_state.current_index, 0)
             w_lv = st.session_state.q_wrong_levels.get(st.session_state.current_index, 0)
-            
             label = f'<div style="text-align:center;"><span class="status-badge badge-new">🆕 신규</span></div>' if c_lv == 0 else f'<div style="text-align:center;"><span class="status-badge badge-review">🔥 Lv.{c_lv}</span></div>'
             st.markdown(label, unsafe_allow_html=True)
-            
             w_bars = "█" * min(w_lv, 15); w_empty = "░" * (15 - len(w_bars))
             c_bars = "█" * min(c_lv, 15); c_empty = "░" * (15 - len(c_bars))
             st.markdown(f'<div class="dual-gauge-container"><div class="gauge-row"><span class="wrong-side">{w_empty}{w_bars}</span><span class="center-line">|</span><span class="correct-side">{c_bars}{c_empty}</span></div></div>', unsafe_allow_html=True)
-            
             st.markdown(f'<p class="question-text">Q. {row["질문"]}</p>', unsafe_allow_html=True)
             if st.button("정답 확인하기 (Space)"): st.session_state.state = "ANSWER"; st.rerun()
-
         elif st.session_state.state == "ANSWER":
-            row = df.iloc[st.session_state.current_index]
-            q_idx = st.session_state.current_index
+            row = df.iloc[st.session_state.current_index]; q_idx = st.session_state.current_index
             st.markdown(f'<p class="answer-text">A. {row["정답"]}</p>', unsafe_allow_html=True)
-            
             c1, c2, c3 = st.columns(3)
             with c1:
                 if st.button("어려움 (1/Ctrl)"):
                     st.session_state.q_wrong_levels[q_idx] = st.session_state.q_wrong_levels.get(q_idx, 0) + 1
-                    st.session_state.q_levels[q_idx] = 1; df.at[q_idx, '오답횟수'] += 1
+                    st.session_state.q_levels[q_idx] = 1; df.at[q_idx, '오답횟수'] += 1; df.at[q_idx, '어려움횟수'] += 1
                     try: conn.update(spreadsheet=st.secrets["gsheets_url"], data=df)
                     except: pass
                     target = st.session_state.solve_count + 5; st.session_state.schedules.setdefault(target, []).append(q_idx)
                     st.session_state.solve_count += 1; st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
             with c2:
                 if st.button("정상 (2/Alt)"):
-                    new_lv = st.session_state.q_levels.get(q_idx, 0) + 1
-                    df.at[q_idx, '정상횟수'] += 1
+                    new_lv = st.session_state.q_levels.get(q_idx, 0) + 1; df.at[q_idx, '정상횟수'] += 1
                     if new_lv > 7: df.at[q_idx, '정답횟수'] = 5; del st.session_state.q_levels[q_idx]
                     else: st.session_state.q_levels[q_idx] = new_lv; st.session_state.schedules.setdefault(st.session_state.solve_count + FIBO_GAP[new_lv], []).append(q_idx)
                     try: conn.update(spreadsheet=st.secrets["gsheets_url"], data=df)
@@ -171,7 +161,6 @@ if df is not None:
                     if q_idx in st.session_state.q_levels: del st.session_state.q_levels[q_idx]
                     st.session_state.solve_count += 1; st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
 
-        # 하단 통합 바
         tot = len(df); m_q = len(df[df['정답횟수'] >= 5]); r_q = len(st.session_state.q_levels); n_q = tot - m_q - r_q
         st.markdown(f'<div class="progress-container"><div class="bar-mastered" style="width:{(m_q/tot)*100}%"></div><div class="bar-review" style="width:{(r_q/tot)*100}%"></div><div class="bar-new" style="width:{(n_q/tot)*100}%"></div></div>', unsafe_allow_html=True)
         st.markdown(f'<div style="display:flex; justify-content:space-between; padding:5px; font-size:0.8rem;"><p>✅{m_q}</p><p>🔥{r_q}</p><p>🆕{n_q}</p></div>', unsafe_allow_html=True)
