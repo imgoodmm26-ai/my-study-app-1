@@ -17,43 +17,43 @@ if 'schedules' not in st.session_state: st.session_state.schedules = {}
 if 'solve_count' not in st.session_state: st.session_state.solve_count = 0
 if 'last_msg' not in st.session_state: st.session_state.last_msg = "데이터 동기화 준비 완료."
 
-# 3. 디자인 설정 (PC 2/3, 모바일 1/2 사이즈 최적화)
+# 3. 디자인 설정 (PC 2/3, 모바일 1/2 사이즈 반영)
 st.markdown("""
 <style>
     .stApp { background-color: black; color: white; }
-    .feedback-text { font-size: 1.2rem !important; color: #00d4ff; font-weight: bold; text-align: center; margin-bottom: 5px; height: 35px; }
-    .status-badge { font-size: 0.9rem; font-weight: bold; padding: 4px 12px; border-radius: 15px; margin-bottom: 10px; display: inline-block; }
+    .feedback-text { font-size: 1.1rem !important; color: #00d4ff; font-weight: bold; text-align: center; margin-bottom: 5px; height: 30px; }
+    .status-badge { font-size: 0.85rem; font-weight: bold; padding: 4px 12px; border-radius: 15px; margin-bottom: 5px; display: inline-block; }
     .badge-new { background-color: #f1c40f; color: black; }
     .badge-review { background-color: #3498db; color: white; }
     
-    /* [PC 기본] 게이지 및 버튼 (2/3 사이즈) */
+    /* 게이지 및 텍스트 기본 (PC 기준) */
     .dual-gauge-container { display: flex; flex-direction: column; align-items: center; margin-bottom: 25px; width: 100%; }
-    .gauge-row { font-size: 2.2rem; font-family: 'Courier New', monospace; display: flex; align-items: center; justify-content: center; white-space: nowrap; overflow: hidden; width: 100%; }
+    .gauge-row { font-size: 1.8rem; font-family: 'Courier New', monospace; display: flex; align-items: center; justify-content: center; white-space: nowrap; overflow: hidden; width: 100%; }
     .wrong-side { color: #e74c3c; text-align: right; width: 450px; letter-spacing: 1px; }
     .correct-side { color: #9b59b6; text-align: left; width: 450px; letter-spacing: 1px; }
-    .center-line { color: #555; font-weight: bold; font-size: 2.5rem; margin: 0 15px; }
+    .center-line { color: #555; font-weight: bold; font-size: 2.2rem; margin: 0 15px; }
     
-    .question-text { font-size: 3.0rem !important; font-weight: bold; color: #f1c40f; text-align: center; margin: 20px 0; line-height: 1.3; }
-    .answer-text { font-size: 3.5rem !important; font-weight: bold; color: #2ecc71; text-align: center; margin: 20px 0; line-height: 1.3; }
+    .question-text { font-size: 2.8rem !important; font-weight: bold; color: #f1c40f; text-align: center; margin: 15px 0; line-height: 1.2; }
+    .answer-text { font-size: 3.0rem !important; font-weight: bold; color: #2ecc71; text-align: center; margin: 15px 0; line-height: 1.2; }
     
-    /* PC 버튼: 110px의 2/3인 75px */
+    /* PC 버튼: 기존 110px -> 약 2/3인 75px로 축소 */
     div.stButton > button { 
         width: 100% !important; height: 75px !important; 
-        font-size: 1.2rem !important; font-weight: bold !important; 
+        font-size: 1.1rem !important; font-weight: bold !important; 
         border-radius: 20px !important; color: white !important; 
         background-color: #34495e !important; border: 2px solid #555 !important; 
     }
     
-    .progress-container { width: 100%; background-color: #222; border-radius: 10px; margin-top: 100px; display: flex; height: 18px; overflow: hidden; border: 1px solid #444; }
+    .progress-container { width: 100%; background-color: #222; border-radius: 10px; margin-top: 80px; display: flex; height: 16px; overflow: hidden; border: 1px solid #444; }
 
-    /* [반응형] 모바일 최적화: 버튼 크기 1/2로 과감히 축소 */
+    /* [핵심] 모바일 최적화: 600px 이하일 때 밀착 및 1/2 버튼 */
     @media (max-width: 600px) {
         .question-text { font-size: 1.6rem !important; margin: 10px 0 !important; }
         .answer-text { font-size: 1.8rem !important; margin: 10px 0 !important; }
         .wrong-side, .correct-side { width: 42vw !important; font-size: 1.1rem !important; }
-        .center-line { font-size: 1.3rem !important; margin: 0 5px !important; }
+        .center-line { font-size: 1.4rem !important; margin: 0 5px !important; }
         
-        /* 모바일 버튼: 약 1/2 사이즈인 50px로 조정 */
+        /* 모바일 버튼: 기존 110px -> 약 1/2인 50px로 축소 */
         div.stButton > button { height: 50px !important; font-size: 0.95rem !important; border-radius: 12px !important; }
         
         .progress-container { margin-top: 30px !important; }
@@ -64,7 +64,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 4. 데이터 로드 (nan 방지 로직 포함)
+# 4. 데이터 로드 (기존 로직 유지)
 conn = st.connection("gsheets", type=GSheetsConnection)
 @st.cache_data(ttl=1)
 def load_data():
@@ -73,8 +73,7 @@ def load_data():
         df_raw = conn.read(spreadsheet=url, worksheet=0)
         df = df_raw.iloc[:, :7]
         df.columns = ['질문', '정답', '정답횟수', '오답횟수', '어려움횟수', '정상횟수', '쉬움횟수']
-        # [핵심] nan 제거로 에러 방지
-        df = df.dropna(subset=['질문']).reset_index(drop=True) 
+        df = df.dropna(subset=['질문']).reset_index(drop=True)
         for col in ['정답횟수', '오답횟수', '어려움횟수', '정상횟수', '쉬움횟수']:
             df[col] = pd.to_numeric(df[col]).fillna(0).astype(int)
         return df
@@ -84,7 +83,7 @@ if 'df' not in st.session_state:
     st.session_state.df = load_data()
 df = st.session_state.df
 
-# 5. 출제 로직 (50% 신규 보급 유지)
+# 5. 출제 로직 (50% 신규 보장 유지)
 def get_next_question(dataframe):
     curr_cnt = st.session_state.solve_count
     all_scheduled = [idx for sublist in st.session_state.schedules.values() for idx in sublist]
@@ -102,14 +101,11 @@ def get_next_question(dataframe):
 
 # --- 6. 메인 화면 ---
 if df is not None:
-    # 동기화 버튼 영역
+    # 상단 동기화 버튼 (포맷 유지)
     t_col1, t_col2 = st.columns([8, 2])
     with t_col2:
         if st.button("🔄 동기화", key="sync_btn"):
-            st.cache_data.clear()
-            st.session_state.df = load_data()
-            st.session_state.last_msg = "최신 데이터 수신 성공!"
-            st.rerun()
+            st.cache_data.clear(); st.session_state.df = load_data(); st.rerun()
 
     if isinstance(st.session_state.current_index, int) and st.session_state.current_index >= len(df):
         st.session_state.current_index = get_next_question(df)
@@ -125,7 +121,7 @@ if df is not None:
                 st.session_state.state = "IDLE"; st.session_state.current_index = None; st.rerun()
 
         elif st.session_state.state == "IDLE":
-            st.markdown('<p class="question-text">와이드 인출 시스템</p>', unsafe_allow_html=True)
+            st.markdown('<p class="question-text">인출 시스템</p>', unsafe_allow_html=True)
             if st.button("훈련 시작 하기 (Space)"):
                 st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
 
@@ -168,7 +164,7 @@ if df is not None:
                     except: pass
                     st.session_state.solve_count += 1; st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
             with c3:
-                if st.button("너무 쉬움"):
+                if st.button("너무 쉬움 (3)"):
                     df.at[q_idx, '정답횟수'] = 5; df.at[q_idx, '쉬움횟수'] += 1
                     try: conn.update(spreadsheet=st.secrets["gsheets_url"], data=df)
                     except: pass
