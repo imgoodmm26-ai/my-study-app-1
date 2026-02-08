@@ -9,7 +9,7 @@ import requests
 # 1. 페이지 설정
 st.set_page_config(page_title="감평 반응형 인출기", layout="wide")
 
-# 2. 세션 설정 (기존 로직 유지)
+# 2. 세션 및 피보나치 설정
 FIBO_GAP = [0, 5, 13, 21, 34, 55, 89, 144] 
 if 'state' not in st.session_state: st.session_state.state = "IDLE"
 if 'current_index' not in st.session_state: st.session_state.current_index = None
@@ -17,10 +17,10 @@ if 'q_levels' not in st.session_state: st.session_state.q_levels = {}
 if 'q_wrong_levels' not in st.session_state: st.session_state.q_wrong_levels = {}
 if 'schedules' not in st.session_state: st.session_state.schedules = {} 
 if 'solve_count' not in st.session_state: st.session_state.solve_count = 0
-if 'last_msg' not in st.session_state: st.session_state.last_msg = "데이터 동기화 준비 완료."
-if 'sheet_name' not in st.session_state: st.session_state.sheet_name = "시트18" # 초기 기본값
+if 'last_msg' not in st.session_state: st.session_state.last_msg = "학습할 탭을 선택해 주세요."
+if 'sheet_name' not in st.session_state: st.session_state.sheet_name = None
 
-# 3. 디자인 설정 (PC 2/3, 모바일 1/2 사이즈 최적화 완벽 유지)
+# 3. 디자인 설정 (PC 2/3, 모바일 1/2 사이즈 최적화 완벽 고수)
 st.markdown("""
 <style>
     .stApp { background-color: black; color: white; }
@@ -36,7 +36,7 @@ st.markdown("""
     .center-line { color: #555; font-weight: bold; font-size: 2.2rem; margin: 0 15px; }
     
     .question-text { font-size: 2.8rem !important; font-weight: bold; color: #f1c40f; text-align: center; margin: 15px 0; line-height: 1.2; }
-    .answer-text { font-size: 3.0rem !important; font-weight: bold; color: #2ecc71; text-align: center; margin: 15px 0; line-height: 1.2; }
+    .answer-text { font-size: 3.0rem !important; font-weight: bold; color: #2ecc71; text-align: center; margin: 25px 0; line-height: 1.2; }
     
     /* PC 버튼: 75px (2/3 사이즈) */
     div.stButton > button { 
@@ -61,25 +61,28 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 4. 데이터 로드 로직 (보강됨)
+# 4. 데이터 로드 및 시트 탭 목록 자동 추출 로직
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-@st.cache_data(ttl=60)
-def get_all_sheet_names():
+@st.cache_data(ttl=300)
+def get_auto_sheet_list():
     try:
-        url = st.secrets["gsheets_url"].strip()
-        sheet_id = re.search(r"/d/([a-zA-Z0-9-_]+)", url).group(1)
-        export_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=xlsx"
-        resp = requests.get(export_url, timeout=5)
-        xls = pd.ExcelFile(resp.content)
-        return xls.sheet_names
+        raw_url = st.secrets["gsheets_url"].strip()
+        # URL에서 Sheet ID만 추출하여 export URL 생성
+        match = re.search(r"/d/([a-zA-Z0-9-_]+)", raw_url)
+        if match:
+            key = match.group(1)
+            export_url = f"https://docs.google.com/spreadsheets/d/{key}/export?format=xlsx"
+            response = requests.get(export_url, timeout=10)
+            xls = pd.ExcelFile(response.content)
+            return xls.sheet_names
+        return []
     except: return []
 
 @st.cache_data(ttl=1)
 def load_data(sheet_name):
     try:
         url = st.secrets["gsheets_url"].strip()
-        # [핵심] 시트 이름을 명시적으로 지정하여 데이터 로드
         df_raw = conn.read(spreadsheet=url, worksheet=sheet_name)
         df = df_raw.iloc[:, :7]
         df.columns = ['질문', '정답', '정답횟수', '오답횟수', '어려움횟수', '정상횟수', '쉬움횟수']
@@ -89,38 +92,42 @@ def load_data(sheet_name):
         return df
     except: return None
 
-# [사이드바] 지능형 시트 선택 도구
-sheet_list = get_all_sheet_names()
+# [사이드바] 스마트 탭 선택기
+all_tabs = get_auto_sheet_list()
 
 with st.sidebar:
-    st.markdown("### 📂 학습 범위 설정")
-    
-    # 목록을 가져온 경우 선택박스 노출
-    if sheet_list:
-        selected = st.selectbox("학습할 시트를 선택하세요:", sheet_list, 
-                                index=sheet_list.index(st.session_state.sheet_name) if st.session_state.sheet_name in sheet_list else 0)
-    # 목록 가져오기 실패 시 직접 입력창 노출 (민법 등)
+    st.markdown("### 📂 학습 범위(탭) 선택")
+    if all_tabs:
+        # 현재 선택된 탭이 목록에 없으면 첫 번째 탭으로 초기화
+        if st.session_state.sheet_name not in all_tabs:
+            st.session_state.sheet_name = all_tabs[0]
+        
+        # 라디오 버튼으로 탭 목록 출력 (이미지 a730fd 형태 구현)
+        selected = st.radio("원하는 탭을 클릭하세요:", all_tabs, 
+                            index=all_tabs.index(st.session_state.sheet_name))
+        
+        if st.button("🔄 목록 새로고침"):
+            st.cache_data.clear(); st.rerun()
     else:
-        st.warning("자동 목록 로드 실패 (공유 설정 확인 요망)")
-        selected = st.text_input("시트 이름을 직접 입력하세요:", value=st.session_state.sheet_name)
-    
-    if st.button("🚀 시트 변경 및 강제 로드"):
-        st.cache_data.clear() # 모든 캐시 삭제
-        st.session_state.sheet_name = selected.strip()
-        st.session_state.df = load_data(st.session_state.sheet_name)
-        # 상태 리셋
+        st.error("탭 목록을 가져오지 못했습니다.")
+        st.info("공유 설정이 '뷰어'인지 확인하시거나 아래에 직접 입력해 주세요.")
+        selected = st.text_input("직접 입력:", value="시트18")
+
+    # 탭 변경 시 상태 리셋
+    if selected != st.session_state.sheet_name:
+        st.session_state.sheet_name = selected
+        st.cache_data.clear()
+        st.session_state.df = load_data(selected)
         st.session_state.current_index = None; st.session_state.state = "IDLE"; st.session_state.solve_count = 0
         st.session_state.q_levels = {}; st.session_state.schedules = {}
-        st.session_state.last_msg = f"'{st.session_state.sheet_name}' 데이터를 새로 수신했습니다."
+        st.session_state.last_msg = f"'{selected}' 탭으로 변경되었습니다."
         st.rerun()
 
-# 초기 데이터 로드 (세션에 없을 경우)
 if 'df' not in st.session_state or st.session_state.df is None:
     st.session_state.df = load_data(st.session_state.sheet_name)
-
 df = st.session_state.df
 
-# 5. 출제 로직 (50:50 기본 비율 유지)
+# 5. 출제 로직 (기존 50:50 유지)
 def get_next_question(dataframe):
     if dataframe is None or len(dataframe) == 0: return None
     curr_cnt = st.session_state.solve_count
@@ -138,10 +145,10 @@ def get_next_question(dataframe):
 if df is not None:
     t_col1, t_col2, t_col3 = st.columns([5, 2.5, 2.5])
     with t_col2:
-        if st.button("🔄 데이터 동기화"):
+        if st.button("🔄 동기화"):
             st.cache_data.clear(); st.session_state.df = load_data(st.session_state.sheet_name); st.rerun()
     with t_col3:
-        # 오답 노트 추출 기능
+        # 오답노트 다운로드 기능
         diff_df = df[df['어려움횟수'] > 0].sort_values(by='어려움횟수', ascending=False)
         if not diff_df.empty:
             csv = diff_df.to_csv(index=False).encode('utf-8-sig')
@@ -154,22 +161,22 @@ if df is not None:
     with col:
         st.markdown(f'<p class="feedback-text">{st.session_state.last_msg}</p>', unsafe_allow_html=True)
         if st.session_state.current_index == "GRADUATED":
-            st.markdown(f'<p class="question-text">🎊 {st.session_state.sheet_name} 정복 완료! 🎊</p>', unsafe_allow_html=True)
-            if st.button("다시 시작하기"):
+            st.markdown(f'<p class="question-text">🎊 [{st.session_state.sheet_name}] 완료! 🎊</p>', unsafe_allow_html=True)
+            if st.button("다시 시작"):
                 st.session_state.q_levels = {}; st.session_state.solve_count = 0; st.session_state.state = "IDLE"; st.session_state.current_index = None; st.rerun()
         elif st.session_state.state == "IDLE":
             st.markdown(f'<p class="question-text">[{st.session_state.sheet_name}] 준비 완료</p>', unsafe_allow_html=True)
-            if st.button("훈련 시작 하기 (Space)"):
+            if st.button("훈련 시작 (Space)"):
                 st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
         elif st.session_state.state == "QUESTION":
             row = df.iloc[st.session_state.current_index]
             c_lv = st.session_state.q_levels.get(st.session_state.current_index, 0)
-            st.markdown(f'<div style="text-align:center;"><span class="status-badge badge-new">🆕 신규 문항</span></div>' if c_lv == 0 else f'<div style="text-align:center;"><span class="status-badge badge-review">🔥 복습 Lv.{c_lv}</span></div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="text-align:center;"><span class="status-badge badge-new">🆕 신규</span></div>' if c_lv == 0 else f'<div style="text-align:center;"><span class="status-badge badge-review">🔥 Lv.{c_lv}</span></div>', unsafe_allow_html=True)
             w_bars = "█" * min(st.session_state.q_wrong_levels.get(st.session_state.current_index, 0), 15); w_empty = "░" * (15 - len(w_bars))
             c_bars = "█" * min(c_lv, 15); c_empty = "░" * (15 - len(c_bars))
             st.markdown(f'<div class="dual-gauge-container"><div class="gauge-row"><span class="wrong-side">{w_empty}{w_bars}</span><span class="center-line">|</span><span class="correct-side">{c_bars}{c_empty}</span></div></div>', unsafe_allow_html=True)
             st.markdown(f'<p class="question-text">Q. {row["질문"]}</p>', unsafe_allow_html=True)
-            if st.button("정답 확인하기 (Space)"): st.session_state.state = "ANSWER"; st.rerun()
+            if st.button("정답 확인 (Space)"): st.session_state.state = "ANSWER"; st.rerun()
         elif st.session_state.state == "ANSWER":
             row = df.iloc[st.session_state.current_index]; q_idx = st.session_state.current_index
             st.markdown(f'<p class="answer-text">A. {row["정답"]}</p>', unsafe_allow_html=True)
@@ -190,9 +197,6 @@ if df is not None:
         tot = len(df); m_q = len(df[df['정답횟수'] >= 5]); r_q = len(st.session_state.q_levels); n_q = tot - m_q - r_q
         st.markdown(f'<div class="progress-container"><div class="bar-mastered" style="width:{(m_q/tot)*100}%"></div><div class="bar-review" style="width:{(r_q/tot)*100}%"></div><div class="bar-new" style="width:{(n_q/tot)*100}%"></div></div>', unsafe_allow_html=True)
         st.markdown(f'<div style="display:flex; justify-content:space-between; padding:5px; font-size:0.8rem;"><p>✅{m_q}</p><p>🔥{r_q}</p><p>🆕{n_q}</p></div>', unsafe_allow_html=True)
-else:
-    st.error(f"'{st.session_state.sheet_name}' 시트를 찾을 수 없거나 데이터가 비어있습니다.")
-    st.info("사이드바에서 시트 이름을 다시 확인하고 버튼을 눌러주세요.")
 
 # 7. 단축키 엔진
 components.html("""<script>const doc = window.parent.document;doc.addEventListener('keydown', function(e) {if (e.code === 'Space') { e.preventDefault(); const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('확인') || el.innerText.includes('시작')); if (btn) btn.click(); }else if (e.key === '1') { const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('어려움')); if (btn) btn.click(); }else if (e.key === '2') { const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('정상')); if (btn) btn.click(); }else if (e.key === '3') { const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('쉬움')); if (btn) btn.click(); }});</script>""", height=0)
