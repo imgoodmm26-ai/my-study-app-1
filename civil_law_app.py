@@ -15,9 +15,11 @@ if 'q_levels' not in st.session_state: st.session_state.q_levels = {}
 if 'q_wrong_levels' not in st.session_state: st.session_state.q_wrong_levels = {}
 if 'schedules' not in st.session_state: st.session_state.schedules = {} 
 if 'solve_count' not in st.session_state: st.session_state.solve_count = 0
-if 'last_msg' not in st.session_state: st.session_state.last_msg = "데이터 동기화 준비 완료."
+if 'last_msg' not in st.session_state: st.session_state.last_msg = "학습할 시트 이름을 입력해 주세요."
+# [추가] 현재 선택된 시트 이름을 저장하는 세션
+if 'sheet_name' not in st.session_state: st.session_state.sheet_name = "시트1"
 
-# 3. 디자인 설정 (PC 2/3, 모바일 1/2 사이즈 최적화)
+# 3. 디자인 설정 (기존 요청 포맷 유지)
 st.markdown("""
 <style>
     .stApp { background-color: black; color: white; }
@@ -25,32 +27,20 @@ st.markdown("""
     .status-badge { font-size: 0.85rem; font-weight: bold; padding: 4px 12px; border-radius: 15px; margin-bottom: 5px; display: inline-block; }
     .badge-new { background-color: #f1c40f; color: black; }
     .badge-review { background-color: #3498db; color: white; }
-    
     .dual-gauge-container { display: flex; flex-direction: column; align-items: center; margin-bottom: 25px; width: 100%; }
     .gauge-row { font-size: 1.8rem; font-family: 'Courier New', monospace; display: flex; align-items: center; justify-content: center; white-space: nowrap; overflow: hidden; width: 100%; }
     .wrong-side { color: #e74c3c; text-align: right; width: 450px; letter-spacing: 1px; }
     .correct-side { color: #9b59b6; text-align: left; width: 450px; letter-spacing: 1px; }
     .center-line { color: #555; font-weight: bold; font-size: 2.2rem; margin: 0 15px; }
-    
     .question-text { font-size: 2.8rem !important; font-weight: bold; color: #f1c40f; text-align: center; margin: 15px 0; line-height: 1.2; }
     .answer-text { font-size: 3.0rem !important; font-weight: bold; color: #2ecc71; text-align: center; margin: 15px 0; line-height: 1.2; }
-    
-    /* PC 버튼: 약 2/3 사이즈 축소 */
-    div.stButton > button { 
-        width: 100% !important; height: 75px !important; 
-        font-size: 1.1rem !important; font-weight: bold !important; 
-        border-radius: 20px !important; color: white !important; 
-        background-color: #34495e !important; border: 2px solid #555 !important; 
-    }
-    
+    div.stButton > button { width: 100% !important; height: 75px !important; font-size: 1.1rem !important; font-weight: bold !important; border-radius: 20px !important; color: white !important; background-color: #34495e !important; border: 2px solid #555 !important; }
     .progress-container { width: 100%; background-color: #222; border-radius: 10px; margin-top: 80px; display: flex; height: 16px; overflow: hidden; border: 1px solid #444; }
-
     @media (max-width: 600px) {
         .question-text { font-size: 1.6rem !important; margin: 10px 0 !important; }
         .answer-text { font-size: 1.8rem !important; margin: 10px 0 !important; }
         .wrong-side, .correct-side { width: 42vw !important; font-size: 1.1rem !important; }
         .center-line { font-size: 1.4rem !important; margin: 0 5px !important; }
-        /* 모바일 버튼: 약 1/2 사이즈 축소 */
         div.stButton > button { height: 50px !important; font-size: 0.95rem !important; border-radius: 12px !important; }
         .progress-container { margin-top: 30px !important; }
     }
@@ -58,25 +48,47 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 4. 데이터 로드
+# 4. 데이터 로드 (시트 이름 선택 로직 추가)
 conn = st.connection("gsheets", type=GSheetsConnection)
+
 @st.cache_data(ttl=1)
-def load_data():
+def load_data(sheet_name):
     try:
         url = st.secrets["gsheets_url"].strip()
-        df_raw = conn.read(spreadsheet=url, worksheet=0)
+        # [핵심 수정] worksheet 인자에 선택된 시트 이름을 넣습니다.
+        df_raw = conn.read(spreadsheet=url, worksheet=sheet_name)
         df = df_raw.iloc[:, :7]
         df.columns = ['질문', '정답', '정답횟수', '오답횟수', '어려움횟수', '정상횟수', '쉬움횟수']
         df = df.dropna(subset=['질문']).reset_index(drop=True)
         for col in ['정답횟수', '오답횟수', '어려움횟수', '정상횟수', '쉬움횟수']:
             df[col] = pd.to_numeric(df[col]).fillna(0).astype(int)
         return df
-    except: return None
+    except Exception as e:
+        return None
 
-if 'df' not in st.session_state: st.session_state.df = load_data()
+# [신규] 사이드바 시트 선택기
+with st.sidebar:
+    st.title("📂 시트 선택")
+    target_sheet = st.text_input("학습할 시트의 이름을 정확히 입력하세요:", value=st.session_state.sheet_name)
+    
+    if st.button("해당 시트로 변경하기"):
+        st.cache_data.clear()
+        st.session_state.sheet_name = target_sheet
+        st.session_state.df = load_data(target_sheet)
+        # 시트가 바뀌면 진행 상태를 리셋합니다.
+        st.session_state.current_index = None
+        st.session_state.state = "IDLE"
+        st.session_state.solve_count = 0
+        st.session_state.q_levels = {}
+        st.session_state.schedules = {}
+        st.session_state.last_msg = f"'{target_sheet}' 시트 로드 완료!"
+        st.rerun()
+
+if 'df' not in st.session_state:
+    st.session_state.df = load_data(st.session_state.sheet_name)
 df = st.session_state.df
 
-# 5. 출제 로직 (50% 신규 보장 유지)
+# 5. 출제 로직
 def get_next_question(dataframe):
     curr_cnt = st.session_state.solve_count
     all_scheduled = [idx for sublist in st.session_state.schedules.values() for idx in sublist]
@@ -94,17 +106,15 @@ def get_next_question(dataframe):
 
 # --- 6. 메인 화면 ---
 if df is not None:
-    # 상단 버튼 레이아웃 (동기화 + 오답노트 다운로드)
     t_col1, t_col2, t_col3 = st.columns([5, 2.5, 2.5])
     with t_col2:
         if st.button("🔄 동기화", key="sync_btn"):
-            st.cache_data.clear(); st.session_state.df = load_data(); st.rerun()
+            st.cache_data.clear(); st.session_state.df = load_data(st.session_state.sheet_name); st.rerun()
     with t_col3:
-        # [핵심] 오답노트 추출 로직
         diff_df = df[df['어려움횟수'] > 0].sort_values(by='어려움횟수', ascending=False)
         if not diff_df.empty:
             csv_data = diff_df.to_csv(index=False).encode('utf-8-sig')
-            st.download_button(label="📥 오답노트 받기", data=csv_data, file_name='my_wrong_notes.csv', mime='text/csv')
+            st.download_button(label="📥 오답노트 받기", data=csv_data, file_name=f'{st.session_state.sheet_name}_오답.csv', mime='text/csv')
         else:
             st.button("📥 오답 없음", disabled=True)
 
@@ -115,11 +125,11 @@ if df is not None:
     with col:
         st.markdown(f'<p class="feedback-text">{st.session_state.last_msg}</p>', unsafe_allow_html=True)
         if st.session_state.current_index == "GRADUATED":
-            st.markdown('<p class="question-text">🎊 모든 문항 정복 완료! 🎊</p>', unsafe_allow_html=True)
+            st.markdown(f'<p class="question-text">🎊 {st.session_state.sheet_name} 정복 완료! 🎊</p>', unsafe_allow_html=True)
             if st.button("처음부터 다시 시작하기"):
                 st.session_state.q_levels = {}; st.session_state.q_wrong_levels = {}; st.session_state.schedules = {}; st.session_state.solve_count = 0; st.session_state.state = "IDLE"; st.session_state.current_index = None; st.rerun()
         elif st.session_state.state == "IDLE":
-            st.markdown('<p class="question-text">인출 시스템</p>', unsafe_allow_html=True)
+            st.markdown(f'<p class="question-text">[{st.session_state.sheet_name}] 인출 시스템</p>', unsafe_allow_html=True)
             if st.button("훈련 시작 하기 (Space)"):
                 st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
         elif st.session_state.state == "QUESTION":
