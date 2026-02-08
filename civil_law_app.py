@@ -16,8 +16,8 @@ if 'q_wrong_levels' not in st.session_state: st.session_state.q_wrong_levels = {
 if 'schedules' not in st.session_state: st.session_state.schedules = {} 
 if 'solve_count' not in st.session_state: st.session_state.solve_count = 0
 if 'last_msg' not in st.session_state: st.session_state.last_msg = "데이터 동기화 준비 완료."
-if 'selected_worksheet' not in st.session_state: st.session_state.selected_worksheet = 0
-if 'worksheet_input' not in st.session_state: st.session_state.worksheet_input = ""
+if 'selected_worksheet' not in st.session_state: st.session_state.selected_worksheet = None
+if 'worksheet_names' not in st.session_state: st.session_state.worksheet_names = []
 
 # 3. 디자인 설정 (PC 2/3, 모바일 1/2 사이즈 최적화)
 st.markdown("""
@@ -63,11 +63,54 @@ st.markdown("""
 # 4. 데이터 로드 함수들
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-@st.cache_data(ttl=1)
-def load_data(worksheet_id):
+# 워크시트 목록 가져오기
+@st.cache_data(ttl=60)
+def get_worksheet_names():
     try:
         url = st.secrets["gsheets_url"].strip()
-        df_raw = conn.read(spreadsheet=url, worksheet=worksheet_id)
+        # GSheetsConnection의 내부 클라이언트 사용
+        # connection 객체를 통해 워크시트 목록 가져오기
+        import gspread
+        from google.oauth2.service_account import Credentials
+        
+        # streamlit secrets에서 인증 정보 가져오기
+        if "gcp_service_account" in st.secrets:
+            # Service Account 사용
+            scopes = ['https://www.googleapis.com/auth/spreadsheets']
+            credentials = Credentials.from_service_account_info(
+                st.secrets["gcp_service_account"], 
+                scopes=scopes
+            )
+            client = gspread.authorize(credentials)
+        else:
+            # 공개 시트 접근 방법 - 하지만 gspread는 기본적으로 인증 필요
+            # 대신 streamlit-gsheets의 connection을 활용
+            # 모든 시트를 순회하면서 존재하는 시트 찾기
+            worksheet_names = []
+            for i in range(20):  # 최대 20개 시트까지 시도
+                try:
+                    test_df = conn.read(spreadsheet=url, worksheet=i, ttl=0, usecols=[0], nrows=1)
+                    if test_df is not None:
+                        # 시트 번호를 이름으로 저장 (실제 이름을 못 가져오므로)
+                        worksheet_names.append(f"시트 {i}")
+                except:
+                    break
+            return worksheet_names if worksheet_names else ["시트 0"]
+        
+        spreadsheet = client.open_by_url(url)
+        return [ws.title for ws in spreadsheet.worksheets()]
+    
+    except Exception as e:
+        # 오류 발생 시 기본 시트 이름들 반환
+        st.warning(f"워크시트 목록을 가져올 수 없습니다. 시트 번호로 접근합니다: {str(e)}")
+        # 최소 5개 시트 옵션 제공
+        return [f"시트 {i}" for i in range(5)]
+
+@st.cache_data(ttl=1)
+def load_data(worksheet_identifier):
+    try:
+        url = st.secrets["gsheets_url"].strip()
+        df_raw = conn.read(spreadsheet=url, worksheet=worksheet_identifier)
         df = df_raw.iloc[:, :7]
         df.columns = ['질문', '정답', '정답횟수', '오답횟수', '어려움횟수', '정상횟수', '쉬움횟수']
         df = df.dropna(subset=['질문']).reset_index(drop=True)
@@ -78,9 +121,22 @@ def load_data(worksheet_id):
         st.error(f"데이터 로드 중 오류 발생: {e}")
         return None
 
+# 초기 워크시트 목록 로드
+if not st.session_state.worksheet_names:
+    st.session_state.worksheet_names = get_worksheet_names()
+
+# 초기 워크시트 설정
+if st.session_state.selected_worksheet is None and st.session_state.worksheet_names:
+    st.session_state.selected_worksheet = st.session_state.worksheet_names[0]
+
 # 초기 데이터 로드
-if 'df' not in st.session_state:
-    st.session_state.df = load_data(st.session_state.selected_worksheet)
+if 'df' not in st.session_state and st.session_state.selected_worksheet:
+    # 시트 이름에서 번호 추출 (만약 "시트 0" 형식이면)
+    if st.session_state.selected_worksheet.startswith("시트 "):
+        sheet_id = int(st.session_state.selected_worksheet.split()[1])
+        st.session_state.df = load_data(sheet_id)
+    else:
+        st.session_state.df = load_data(st.session_state.selected_worksheet)
 
 df = st.session_state.df
 
@@ -102,70 +158,63 @@ def get_next_question(dataframe):
 
 # --- 6. 메인 화면 ---
 if df is not None:
-    # 워크시트 선택 UI (최상단) - 인덱스 또는 이름으로 선택
+    # 워크시트 선택 UI (최상단)
     st.markdown("### 📚 학습 시트 선택")
     
-    col_ws1, col_ws2, col_ws3 = st.columns([3, 5, 2])
+    col_ws1, col_ws2 = st.columns([8, 2])
     
     with col_ws1:
-        # 시트 번호로 선택 (0부터 시작)
-        worksheet_number = st.number_input(
-            "시트 번호 (0부터 시작):",
-            min_value=0,
-            value=st.session_state.selected_worksheet,
-            step=1,
-            key="ws_number"
+        selected = st.selectbox(
+            "시트 선택:",
+            st.session_state.worksheet_names,
+            index=st.session_state.worksheet_names.index(st.session_state.selected_worksheet) if st.session_state.selected_worksheet in st.session_state.worksheet_names else 0,
+            key="worksheet_selector",
+            label_visibility="collapsed"
         )
     
     with col_ws2:
-        # 또는 시트 이름으로 직접 입력
-        worksheet_name_input = st.text_input(
-            "또는 시트 이름 입력:",
-            value=st.session_state.worksheet_input,
-            key="ws_name",
-            placeholder="예: Sheet1, 중급, 고급"
-        )
+        if st.button("🔄 새로고침", key="refresh_worksheets"):
+            st.cache_data.clear()
+            st.session_state.worksheet_names = get_worksheet_names()
+            st.rerun()
     
-    with col_ws3:
-        if st.button("🔄 불러오기", key="load_worksheet"):
-            try:
-                # 이름이 입력되어 있으면 이름 우선, 아니면 번호 사용
-                selected = worksheet_name_input if worksheet_name_input else worksheet_number
-                
-                st.cache_data.clear()
-                new_df = load_data(selected)
-                
-                if new_df is not None:
-                    st.session_state.selected_worksheet = selected
-                    st.session_state.worksheet_input = worksheet_name_input
-                    st.session_state.df = new_df
-                    df = new_df
-                    
-                    # 학습 상태 초기화
-                    st.session_state.q_levels = {}
-                    st.session_state.q_wrong_levels = {}
-                    st.session_state.schedules = {}
-                    st.session_state.solve_count = 0
-                    st.session_state.state = "IDLE"
-                    st.session_state.current_index = None
-                    st.session_state.last_msg = f"시트 '{selected}' 로드 완료!"
-                    st.rerun()
-                else:
-                    st.error(f"시트 '{selected}'를 불러올 수 없습니다.")
-            except Exception as e:
-                st.error(f"오류 발생: {e}")
+    # 워크시트가 변경되면 데이터 다시 로드 및 학습 상태 초기화
+    if selected != st.session_state.selected_worksheet:
+        st.session_state.selected_worksheet = selected
+        st.cache_data.clear()
+        
+        # 시트 이름에서 번호 추출 (만약 "시트 0" 형식이면)
+        if selected.startswith("시트 "):
+            sheet_id = int(selected.split()[1])
+            st.session_state.df = load_data(sheet_id)
+        else:
+            st.session_state.df = load_data(selected)
+        
+        df = st.session_state.df
+        
+        # 학습 상태 초기화
+        st.session_state.q_levels = {}
+        st.session_state.q_wrong_levels = {}
+        st.session_state.schedules = {}
+        st.session_state.solve_count = 0
+        st.session_state.state = "IDLE"
+        st.session_state.current_index = None
+        st.session_state.last_msg = f"'{selected}' 시트로 전환되었습니다."
+        st.rerun()
     
     st.markdown("---")  # 구분선
-    
-    # 현재 시트 정보 표시
-    st.markdown(f"**현재 시트:** {st.session_state.selected_worksheet}")
     
     # 상단 버튼 레이아웃 (동기화 + 오답노트 다운로드)
     t_col1, t_col2, t_col3 = st.columns([5, 2.5, 2.5])
     with t_col2:
         if st.button("🔄 동기화", key="sync_btn"):
             st.cache_data.clear()
-            st.session_state.df = load_data(st.session_state.selected_worksheet)
+            # 시트 이름에서 번호 추출
+            if st.session_state.selected_worksheet.startswith("시트 "):
+                sheet_id = int(st.session_state.selected_worksheet.split()[1])
+                st.session_state.df = load_data(sheet_id)
+            else:
+                st.session_state.df = load_data(st.session_state.selected_worksheet)
             st.rerun()
     with t_col3:
         # [핵심] 오답노트 추출 로직
@@ -175,7 +224,7 @@ if df is not None:
             st.download_button(
                 label="📥 오답노트 받기", 
                 data=csv_data, 
-                file_name=f'시트{st.session_state.selected_worksheet}_오답노트.csv', 
+                file_name=f'{st.session_state.selected_worksheet}_오답노트.csv', 
                 mime='text/csv'
             )
         else:
@@ -230,7 +279,11 @@ if df is not None:
                     df.at[q_idx, '오답횟수'] += 1
                     df.at[q_idx, '어려움횟수'] += 1
                     try:
-                        conn.update(spreadsheet=st.secrets["gsheets_url"], worksheet=st.session_state.selected_worksheet, data=df)
+                        # 시트 식별자 결정
+                        sheet_id = st.session_state.selected_worksheet
+                        if sheet_id.startswith("시트 "):
+                            sheet_id = int(sheet_id.split()[1])
+                        conn.update(spreadsheet=st.secrets["gsheets_url"], worksheet=sheet_id, data=df)
                     except:
                         pass
                     target = st.session_state.solve_count + 5
@@ -250,7 +303,10 @@ if df is not None:
                         st.session_state.q_levels[q_idx] = new_lv
                         st.session_state.schedules.setdefault(st.session_state.solve_count + FIBO_GAP[new_lv], []).append(q_idx)
                     try:
-                        conn.update(spreadsheet=st.secrets["gsheets_url"], worksheet=st.session_state.selected_worksheet, data=df)
+                        sheet_id = st.session_state.selected_worksheet
+                        if sheet_id.startswith("시트 "):
+                            sheet_id = int(sheet_id.split()[1])
+                        conn.update(spreadsheet=st.secrets["gsheets_url"], worksheet=sheet_id, data=df)
                     except:
                         pass
                     st.session_state.solve_count += 1
@@ -262,7 +318,10 @@ if df is not None:
                     df.at[q_idx, '정답횟수'] = 5
                     df.at[q_idx, '쉬움횟수'] += 1
                     try:
-                        conn.update(spreadsheet=st.secrets["gsheets_url"], worksheet=st.session_state.selected_worksheet, data=df)
+                        sheet_id = st.session_state.selected_worksheet
+                        if sheet_id.startswith("시트 "):
+                            sheet_id = int(sheet_id.split()[1])
+                        conn.update(spreadsheet=st.secrets["gsheets_url"], worksheet=sheet_id, data=df)
                     except:
                         pass
                     if q_idx in st.session_state.q_levels:
