@@ -15,14 +15,15 @@ if 'q_levels' not in st.session_state: st.session_state.q_levels = {}
 if 'q_wrong_levels' not in st.session_state: st.session_state.q_wrong_levels = {}
 if 'schedules' not in st.session_state: st.session_state.schedules = {} 
 if 'solve_count' not in st.session_state: st.session_state.solve_count = 0
-if 'last_msg' not in st.session_state: st.session_state.last_msg = "데이터 동기화 준비 완료."
+if 'last_msg' not in st.session_state: st.session_state.last_msg = "학습 준비 완료."
+if 'sheet_name' not in st.session_state: st.session_state.sheet_name = "시트1" # 기본 시트명 설정
 
-# 3. 디자인 설정 (PC 2/3, 모바일 1/2 사이즈 최적화)
+# 3. 디자인 설정 (PC 2/3, 모바일 1/2 사이즈 최적화 완벽 유지)
 st.markdown("""
 <style>
     .stApp { background-color: black; color: white; }
     .feedback-text { font-size: 1.1rem !important; color: #00d4ff; font-weight: bold; text-align: center; margin-bottom: 5px; height: 30px; }
-    .status-badge { font-size: 0.85rem; font-weight: bold; padding: 4px 12px; border-radius: 15px; margin-bottom: 5px; display: inline-block; }
+    .status-badge { font-size: 0.85rem; font-weight: bold; padding: 4px 12px; border-radius: 15px; margin-bottom: 10px; display: inline-block; }
     .badge-new { background-color: #f1c40f; color: black; }
     .badge-review { background-color: #3498db; color: white; }
     
@@ -33,7 +34,7 @@ st.markdown("""
     .center-line { color: #555; font-weight: bold; font-size: 2.2rem; margin: 0 15px; }
     
     .question-text { font-size: 2.8rem !important; font-weight: bold; color: #f1c40f; text-align: center; margin: 15px 0; line-height: 1.2; }
-    .answer-text { font-size: 3.0rem !important; font-weight: bold; color: #2ecc71; text-align: center; margin: 15px 0; line-height: 1.2; }
+    .answer-text { font-size: 3.0rem !important; font-weight: bold; color: #2ecc71; text-align: center; margin: 25px 0; line-height: 1.2; }
     
     /* PC 버튼: 약 2/3 사이즈 축소 */
     div.stButton > button { 
@@ -58,13 +59,15 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 4. 데이터 로드
+# 4. 데이터 로드 (매개변수로 시트 이름 받기)
 conn = st.connection("gsheets", type=GSheetsConnection)
+
 @st.cache_data(ttl=1)
-def load_data():
+def load_data(target_sheet):
     try:
         url = st.secrets["gsheets_url"].strip()
-        df_raw = conn.read(spreadsheet=url, worksheet=0)
+        # 입력받은 시트 이름으로 데이터 로드
+        df_raw = conn.read(spreadsheet=url, worksheet=target_sheet)
         df = df_raw.iloc[:, :7]
         df.columns = ['질문', '정답', '정답횟수', '오답횟수', '어려움횟수', '정상횟수', '쉬움횟수']
         df = df.dropna(subset=['질문']).reset_index(drop=True)
@@ -73,10 +76,7 @@ def load_data():
         return df
     except: return None
 
-if 'df' not in st.session_state: st.session_state.df = load_data()
-df = st.session_state.df
-
-# 5. 출제 로직 (50% 신규 보장 유지)
+# 5. 출제 로직
 def get_next_question(dataframe):
     curr_cnt = st.session_state.solve_count
     all_scheduled = [idx for sublist in st.session_state.schedules.values() for idx in sublist]
@@ -92,22 +92,47 @@ def get_next_question(dataframe):
     if future_keys: return st.session_state.schedules[future_keys[0]].pop(0)
     return "GRADUATED"
 
-# --- 6. 메인 화면 ---
-if df is not None:
-    # 상단 버튼 레이아웃 (동기화 + 오답노트 다운로드)
-    t_col1, t_col2, t_col3 = st.columns([5, 2.5, 2.5])
-    with t_col2:
-        if st.button("🔄 동기화", key="sync_btn"):
-            st.cache_data.clear(); st.session_state.df = load_data(); st.rerun()
-    with t_col3:
-        # [핵심] 오답노트 추출 로직
+# --- 6. 메인 화면 (상단 툴바 개편) ---
+# 최상단에 탭 입력, 동기화, 오답노트 버튼을 한 줄로 배치
+t_col1, t_col2, t_col3 = st.columns([4, 3, 3])
+
+with t_col1:
+    # 텍스트 입력창: 엔터를 치거나 다른 곳을 클릭하면 session_state.input_sheet 업데이트
+    input_sheet = st.text_input("📝 탭 이름 (예: 민법, 시트18)", value=st.session_state.sheet_name, key="input_sheet")
+    
+    # 입력값이 바뀌면 세션 리셋 후 로드
+    if input_sheet != st.session_state.sheet_name:
+        st.session_state.sheet_name = input_sheet.strip()
+        st.cache_data.clear()
+        st.session_state.df = load_data(st.session_state.sheet_name)
+        st.session_state.q_levels = {}; st.session_state.q_wrong_levels = {}; st.session_state.schedules = {}; st.session_state.solve_count = 0
+        st.session_state.state = "IDLE"; st.session_state.current_index = None
+        st.session_state.last_msg = f"'{st.session_state.sheet_name}' 탭으로 이동했습니다."
+        st.rerun()
+
+# 초기 로드 안전망
+if 'df' not in st.session_state or st.session_state.df is None:
+    st.session_state.df = load_data(st.session_state.sheet_name)
+df = st.session_state.df
+
+with t_col2:
+    if st.button("🔄 강제 동기화", use_container_width=True):
+        st.cache_data.clear()
+        st.session_state.df = load_data(st.session_state.sheet_name)
+        st.session_state.last_msg = "최신 데이터 수신 완료!"
+        st.rerun()
+        
+with t_col3:
+    if df is not None:
         diff_df = df[df['어려움횟수'] > 0].sort_values(by='어려움횟수', ascending=False)
         if not diff_df.empty:
             csv_data = diff_df.to_csv(index=False).encode('utf-8-sig')
-            st.download_button(label="📥 오답노트 받기", data=csv_data, file_name='my_wrong_notes.csv', mime='text/csv')
+            st.download_button(label="📥 오답노트 받기", data=csv_data, file_name=f'{st.session_state.sheet_name}_오답.csv', mime='text/csv', use_container_width=True)
         else:
-            st.button("📥 오답 없음", disabled=True)
+            st.button("📥 오답 없음", disabled=True, use_container_width=True)
 
+# 데이터가 제대로 로드되었는지 확인
+if df is not None:
     if isinstance(st.session_state.current_index, int) and st.session_state.current_index >= len(df):
         st.session_state.current_index = get_next_question(df)
 
@@ -115,11 +140,11 @@ if df is not None:
     with col:
         st.markdown(f'<p class="feedback-text">{st.session_state.last_msg}</p>', unsafe_allow_html=True)
         if st.session_state.current_index == "GRADUATED":
-            st.markdown('<p class="question-text">🎊 모든 문항 정복 완료! 🎊</p>', unsafe_allow_html=True)
+            st.markdown(f'<p class="question-text">🎊 [{st.session_state.sheet_name}] 정복 완료! 🎊</p>', unsafe_allow_html=True)
             if st.button("처음부터 다시 시작하기"):
                 st.session_state.q_levels = {}; st.session_state.q_wrong_levels = {}; st.session_state.schedules = {}; st.session_state.solve_count = 0; st.session_state.state = "IDLE"; st.session_state.current_index = None; st.rerun()
         elif st.session_state.state == "IDLE":
-            st.markdown('<p class="question-text">인출 시스템</p>', unsafe_allow_html=True)
+            st.markdown(f'<p class="question-text">[{st.session_state.sheet_name}] 인출 시스템</p>', unsafe_allow_html=True)
             if st.button("훈련 시작 하기 (Space)"):
                 st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
         elif st.session_state.state == "QUESTION":
@@ -143,7 +168,7 @@ if df is not None:
                     st.session_state.q_levels[q_idx] = 1; df.at[q_idx, '오답횟수'] += 1; df.at[q_idx, '어려움횟수'] += 1
                     try: conn.update(spreadsheet=st.secrets["gsheets_url"], data=df)
                     except: pass
-                    target = st.session_state.solve_count + 5; st.session_state.schedules.setdefault(target, []).append(q_idx)
+                    st.session_state.schedules.setdefault(st.session_state.solve_count + 5, []).append(q_idx)
                     st.session_state.solve_count += 1; st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
             with c2:
                 if st.button("정상 (2/Alt)"):
@@ -164,6 +189,9 @@ if df is not None:
         tot = len(df); m_q = len(df[df['정답횟수'] >= 5]); r_q = len(st.session_state.q_levels); n_q = tot - m_q - r_q
         st.markdown(f'<div class="progress-container"><div class="bar-mastered" style="width:{(m_q/tot)*100}%"></div><div class="bar-review" style="width:{(r_q/tot)*100}%"></div><div class="bar-new" style="width:{(n_q/tot)*100}%"></div></div>', unsafe_allow_html=True)
         st.markdown(f'<div style="display:flex; justify-content:space-between; padding:5px; font-size:0.8rem;"><p>✅{m_q}</p><p>🔥{r_q}</p><p>🆕{n_q}</p></div>', unsafe_allow_html=True)
+else:
+    st.error(f"⚠️ '{st.session_state.sheet_name}' 탭을 구글 시트에서 찾을 수 없습니다.")
+    st.info("상단의 입력창에 구글 시트 하단에 적힌 탭 이름(예: 민법, 시트18)을 정확히 입력해 주세요.")
 
 # 7. 단축키 엔진
 components.html("""<script>const doc = window.parent.document;doc.addEventListener('keydown', function(e) {if (e.code === 'Space') { e.preventDefault(); const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('확인') || el.innerText.includes('시작')); if (btn) btn.click(); }else if (e.key === 'Control' || e.key === '1') { const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('어려움')); if (btn) btn.click(); }else if (e.key === 'Alt' || e.key === '2') { e.preventDefault(); const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('정상')); if (btn) btn.click(); }else if (e.key === '3') { const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('쉬움')); if (btn) btn.click(); }});</script>""", height=0)
