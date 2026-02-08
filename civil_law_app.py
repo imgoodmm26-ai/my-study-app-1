@@ -3,6 +3,7 @@ from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import random
 import streamlit.components.v1 as components
+import re
 
 # 1. 페이지 설정
 st.set_page_config(page_title="감평 반응형 인출기", layout="wide")
@@ -32,7 +33,7 @@ st.markdown("""
     .correct-side { color: #9b59b6; text-align: left; width: 450px; letter-spacing: 1px; }
     .center-line { color: #555; font-weight: bold; font-size: 2.2rem; margin: 0 15px; }
     .question-text { font-size: 2.8rem !important; font-weight: bold; color: #f1c40f; text-align: center; margin: 15px 0; line-height: 1.2; }
-    .answer-text { font-size: 3.0rem !important; font-weight: bold; color: #2ecc71; text-align: center; margin: 15px 0; line-height: 1.2; }
+    .answer-text { font-size: 3.0rem !important; font-weight: bold; color: #2ecc71; text-align: center; margin: 25px 0; line-height: 1.2; }
     div.stButton > button { width: 100% !important; height: 75px !important; font-size: 1.1rem !important; font-weight: bold !important; border-radius: 20px !important; color: white !important; background-color: #34495e !important; border: 2px solid #555 !important; }
     .progress-container { width: 100%; background-color: #222; border-radius: 10px; margin-top: 80px; display: flex; height: 16px; overflow: hidden; border: 1px solid #444; }
     @media (max-width: 600px) {
@@ -46,19 +47,23 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 4. 데이터 로드 로직 (시트 목록 자동 추출 포함)
+# 4. 데이터 로드 로직 (시트 목록 자동 추출 보강)
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 @st.cache_data(ttl=60)
 def get_all_sheet_names():
     try:
         url = st.secrets["gsheets_url"].strip()
-        # 시트의 모든 탭 이름을 가져오기 위해 /export 형식으로 접근
-        sheet_id = url.split("/d/")[1].split("/")[0]
-        export_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=xlsx"
-        xls = pd.ExcelFile(export_url)
-        return xls.sheet_names
-    except: return ["시트1"] # 기본값
+        # 정규표현식으로 Sheet ID 추출 (더 안전한 방식)
+        match = re.search(r"/d/([a-zA-Z0-9-_]+)", url)
+        if match:
+            sheet_id = match.group(1)
+            export_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=xlsx"
+            xls = pd.ExcelFile(export_url)
+            return xls.sheet_names
+        return ["시트 확인 필요"]
+    except Exception as e:
+        return [f"연결 오류: 공유 설정 확인"]
 
 @st.cache_data(ttl=1)
 def load_data(sheet_name):
@@ -67,6 +72,7 @@ def load_data(sheet_name):
         df_raw = conn.read(spreadsheet=url, worksheet=sheet_name)
         df = df_raw.iloc[:, :7]
         df.columns = ['질문', '정답', '정답횟수', '오답횟수', '어려움횟수', '정상횟수', '쉬움횟수']
+        # 질문 칸이 비어있는 행(nan) 자동 제거
         df = df.dropna(subset=['질문']).reset_index(drop=True)
         for col in ['정답횟수', '오답횟수', '어려움횟수', '정상횟수', '쉬움횟수']:
             df[col] = pd.to_numeric(df[col]).fillna(0).astype(int)
@@ -75,21 +81,21 @@ def load_data(sheet_name):
 
 # [핵심] 사이드바 시트 나열 및 선택기
 sheet_list = get_all_sheet_names()
-if st.session_state.sheet_name is None: st.session_state.sheet_name = sheet_list[0]
+if st.session_state.sheet_name is None or st.session_state.sheet_name not in sheet_list:
+    st.session_state.sheet_name = sheet_list[0]
 
 with st.sidebar:
     st.markdown("### 📂 시트 목록")
-    # 라디오 버튼으로 시트를 나열하여 선택하게 함
-    selected = st.radio("공부할 시트를 선택하세요", sheet_list, index=sheet_list.index(st.session_state.sheet_name))
+    # 라디오 버튼으로 시트를 나열
+    selected = st.radio("공부할 시트를 선택하세요", sheet_list, index=sheet_list.index(st.session_state.sheet_name) if st.session_state.sheet_name in sheet_list else 0)
     
     if selected != st.session_state.sheet_name:
         st.session_state.sheet_name = selected
         st.cache_data.clear()
         st.session_state.df = load_data(selected)
-        # 상태 리셋
         st.session_state.current_index = None; st.session_state.state = "IDLE"; st.session_state.solve_count = 0
         st.session_state.q_levels = {}; st.session_state.schedules = {}
-        st.session_state.last_msg = f"'{selected}' 시트로 이동했습니다."
+        st.session_state.last_msg = f"'{selected}' 시트 로드 완료!"
         st.rerun()
 
 if 'df' not in st.session_state: st.session_state.df = load_data(st.session_state.sheet_name)
@@ -130,7 +136,7 @@ if df is not None:
     with col:
         st.markdown(f'<p class="feedback-text">{st.session_state.last_msg}</p>', unsafe_allow_html=True)
         if st.session_state.state == "IDLE":
-            st.markdown(f'<p class="question-text">[{st.session_state.sheet_name}] 훈련 대기 중</p>', unsafe_allow_html=True)
+            st.markdown(f'<p class="question-text">[{st.session_state.sheet_name}] 준비 완료</p>', unsafe_allow_html=True)
             if st.button("훈련 시작 하기 (Space)"):
                 st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
         elif st.session_state.state == "QUESTION":
