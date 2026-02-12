@@ -3,3 +3,5 @@ pandas
 st-gsheets-connection
 openpyxl
 requests
+google-api-python-client
+google-auth
