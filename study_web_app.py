@@ -1,4 +1,5 @@
 import streamlit as st
+from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import random
 import streamlit.components.v1 as components
@@ -17,10 +18,10 @@ if 'q_levels' not in st.session_state: st.session_state.q_levels = {}
 if 'q_wrong_levels' not in st.session_state: st.session_state.q_wrong_levels = {}
 if 'schedules' not in st.session_state: st.session_state.schedules = {} 
 if 'solve_count' not in st.session_state: st.session_state.solve_count = 0
-if 'last_msg' not in st.session_state: st.session_state.last_msg = "데이터 로드 준비 중..."
+if 'last_msg' not in st.session_state: st.session_state.last_msg = "준비 완료"
 if 'sheet_name' not in st.session_state: st.session_state.sheet_name = None
 
-# 3. 디자인 설정 (기존 유지)
+# 3. 디자인 설정 (PC 2/3, 모바일 1/2)
 st.markdown("""
 <style>
     .stApp { background-color: black; color: white; }
@@ -48,7 +49,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 4. [핵심 변경] 데이터 로드 로직 (GViz API 사용) - 훨씬 안정적임
+# 4. 데이터 로드 (GViz API)
 @st.cache_data(ttl=60)
 def get_sheet_id():
     try:
@@ -59,7 +60,6 @@ def get_sheet_id():
 
 @st.cache_data(ttl=300)
 def get_all_sheet_names():
-    # openpyxl이 설치되어 있어야 작동함
     sheet_id = get_sheet_id()
     if not sheet_id: return []
     try:
@@ -70,60 +70,66 @@ def get_all_sheet_names():
         return xls.sheet_names
     except: return []
 
+# 구글 드라이브 이미지 변환
+def convert_google_drive_link(url):
+    if "drive.google.com" in url and "/view" in url:
+        file_id = url.split('/d/')[1].split('/')[0]
+        return f"https://drive.google.com/uc?id={file_id}"
+    return url
+
 @st.cache_data(ttl=1)
 def load_data(sheet_name):
     sheet_id = get_sheet_id()
     if not sheet_id: return None
     try:
-        # 한글 시트 이름을 URL 인코딩하여 직접 CSV로 요청 (가장 확실한 방법)
         encoded_name = quote(sheet_name)
         csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={encoded_name}"
-        
         df = pd.read_csv(csv_url)
-        # 컬럼 매핑 (혹시 모를 공백 제거)
         df.columns = [c.strip() for c in df.columns]
-        # 필수 컬럼만 선택 (인덱스로 접근하여 이름 불일치 방지)
-        df = df.iloc[:, :7]
-        df.columns = ['질문', '정답', '정답횟수', '오답횟수', '어려움횟수', '정상횟수', '쉬움횟수']
+        
+        # 이미지 컬럼 없으면 생성
+        if '이미지' not in df.columns: df['이미지'] = pd.NA
+        
+        # 필요한 컬럼만 추출
+        cols = ['질문', '정답', '정답횟수', '오답횟수', '어려움횟수', '정상횟수', '쉬움횟수', '이미지']
+        df = df[[c for c in cols if c in df.columns]]
         
         df = df.dropna(subset=['질문']).reset_index(drop=True)
         for col in ['정답횟수', '오답횟수', '어려움횟수', '정상횟수', '쉬움횟수']:
-            df[col] = pd.to_numeric(df[col]).fillna(0).astype(int)
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col]).fillna(0).astype(int)
         return df
-    except Exception as e:
-        return None
+    except: return None
 
-# [상단 접이식 메뉴] 시트 선택
+# [사이드바] 시트 선택 (메인 화면 간섭 X)
 sheet_list = get_all_sheet_names()
-
-with st.expander("⚙️ 학습 시트 변경 (클릭)", expanded=False):
+with st.sidebar:
+    st.header("📂 학습 시트 선택")
     if sheet_list:
         if st.session_state.sheet_name not in sheet_list:
             st.session_state.sheet_name = sheet_list[0]
-        selected = st.radio("시트 목록:", sheet_list, index=sheet_list.index(st.session_state.sheet_name), horizontal=True)
+        selected = st.radio("목록:", sheet_list, index=sheet_list.index(st.session_state.sheet_name))
     else:
-        st.warning("자동 목록 로드 실패 (requirements.txt에 openpyxl 확인)")
-        selected = st.text_input("시트 이름 직접 입력:", value=st.session_state.sheet_name or "시트18")
+        st.warning("목록 로드 실패 (수동 입력)")
+        selected = st.text_input("시트 이름:", value=st.session_state.sheet_name or "시트1")
     
-    if st.button("🚀 선택한 시트로 학습 시작"):
-        st.cache_data.clear()
+    if selected != st.session_state.sheet_name:
         st.session_state.sheet_name = selected
+        st.cache_data.clear()
         st.session_state.df = load_data(selected)
         st.session_state.current_index = None; st.session_state.state = "IDLE"; st.session_state.solve_count = 0
         st.session_state.q_levels = {}; st.session_state.schedules = {}
-        st.session_state.last_msg = f"'{selected}' 로드 완료!"
+        st.session_state.last_msg = f"'{selected}' 변경 완료"
         st.rerun()
 
-# 초기 로드
 if 'df' not in st.session_state or st.session_state.df is None:
-    # 기본값 설정
-    initial_sheet = st.session_state.sheet_name if st.session_state.sheet_name else (sheet_list[0] if sheet_list else "시트18")
-    st.session_state.sheet_name = initial_sheet
-    st.session_state.df = load_data(initial_sheet)
+    initial = st.session_state.sheet_name if st.session_state.sheet_name else (sheet_list[0] if sheet_list else "시트1")
+    st.session_state.sheet_name = initial
+    st.session_state.df = load_data(initial)
 
 df = st.session_state.df
 
-# 5. 출제 로직 (유지)
+# 5. 출제 로직
 def get_next_question(dataframe):
     if dataframe is None or len(dataframe) == 0: return None
     curr_cnt = st.session_state.solve_count
@@ -131,23 +137,27 @@ def get_next_question(dataframe):
     available_new = [i for i in range(len(dataframe)) if int(dataframe.iloc[i]['정답횟수']) < 5 and i not in all_scheduled]
     pending_keys = sorted([k for k in st.session_state.schedules.keys() if k <= curr_cnt and st.session_state.schedules[k]])
     if available_new and pending_keys:
-        if random.random() < 0.5: return random.choice(available_new)
-        else: return st.session_state.schedules[pending_keys[0]].pop(0)
+        return random.choice(available_new) if random.random() < 0.5 else st.session_state.schedules[pending_keys[0]].pop(0)
     if available_new: return random.choice(available_new)
     if pending_keys: return st.session_state.schedules[pending_keys[0]].pop(0)
     return "GRADUATED"
 
 # --- 6. 메인 화면 ---
 if df is not None and not df.empty:
-    t_col1, t_col2, t_col3 = st.columns([5, 2.5, 2.5])
-    with t_col2:
+    # 상단: 동기화 & 오답노트
+    c1, c2, c3 = st.columns([6, 2, 2])
+    with c2:
         if st.button("🔄 동기화"):
             st.cache_data.clear(); st.session_state.df = load_data(st.session_state.sheet_name); st.rerun()
-    with t_col3:
-        diff_df = df[df['어려움횟수'] > 0].sort_values(by='어려움횟수', ascending=False)
-        if not diff_df.empty:
-            csv = diff_df.to_csv(index=False).encode('utf-8-sig')
-            st.download_button(label="📥 오답노트", data=csv, file_name=f'{st.session_state.sheet_name}_오답.csv', mime='text/csv')
+    with c3:
+        # [핵심] 오답노트 다운로드 버튼 복구
+        if '어려움횟수' in df.columns:
+            diff_df = df[df['어려움횟수'] > 0].sort_values(by='어려움횟수', ascending=False)
+            if not diff_df.empty:
+                csv = diff_df.to_csv(index=False).encode('utf-8-sig')
+                st.download_button(label="📥 오답노트", data=csv, file_name=f'{st.session_state.sheet_name}_오답.csv', mime='text/csv')
+            else:
+                st.button("📥 오답 없음", disabled=True)
 
     if isinstance(st.session_state.current_index, int) and st.session_state.current_index >= len(df):
         st.session_state.current_index = get_next_question(df)
@@ -156,7 +166,7 @@ if df is not None and not df.empty:
     with col:
         st.markdown(f'<p class="feedback-text">{st.session_state.last_msg}</p>', unsafe_allow_html=True)
         if st.session_state.current_index == "GRADUATED":
-            st.markdown(f'<p class="question-text">🎊 {st.session_state.sheet_name} 완료! 🎊</p>', unsafe_allow_html=True)
+            st.markdown(f'<p class="question-text">🎊 {st.session_state.sheet_name} 정복! 🎊</p>', unsafe_allow_html=True)
             if st.button("다시 시작"):
                 st.session_state.q_levels = {}; st.session_state.solve_count = 0; st.session_state.state = "IDLE"; st.session_state.current_index = None; st.rerun()
         elif st.session_state.state == "IDLE":
@@ -166,7 +176,13 @@ if df is not None and not df.empty:
         elif st.session_state.state == "QUESTION":
             row = df.iloc[st.session_state.current_index]
             c_lv = st.session_state.q_levels.get(st.session_state.current_index, 0)
-            st.markdown(f'<div style="text-align:center;"><span class="status-badge badge-new">🆕 신규</span></div>' if c_lv == 0 else f'<div style="text-align:center;"><span class="status-badge badge-review">🔥 복습 Lv.{c_lv}</span></div>', unsafe_allow_html=True)
+            
+            # 이미지 처리
+            if '이미지' in row and pd.notna(row['이미지']) and str(row['이미지']).strip() != "":
+                img_url = convert_google_drive_link(str(row['이미지']).strip())
+                st.image(img_url, use_container_width=True)
+            
+            st.markdown(f'<div style="text-align:center;"><span class="status-badge badge-new">🆕 신규</span></div>' if c_lv == 0 else f'<div style="text-align:center;"><span class="status-badge badge-review">🔥 Lv.{c_lv}</span></div>', unsafe_allow_html=True)
             w_bars = "█" * min(st.session_state.q_wrong_levels.get(st.session_state.current_index, 0), 15); w_empty = "░" * (15 - len(w_bars))
             c_bars = "█" * min(c_lv, 15); c_empty = "░" * (15 - len(c_bars))
             st.markdown(f'<div class="dual-gauge-container"><div class="gauge-row"><span class="wrong-side">{w_empty}{w_bars}</span><span class="center-line">|</span><span class="correct-side">{c_bars}{c_empty}</span></div></div>', unsafe_allow_html=True)
@@ -174,19 +190,19 @@ if df is not None and not df.empty:
             if st.button("정답 확인 (Space)"): st.session_state.state = "ANSWER"; st.rerun()
         elif st.session_state.state == "ANSWER":
             row = df.iloc[st.session_state.current_index]; q_idx = st.session_state.current_index
+            
+            if '이미지' in row and pd.notna(row['이미지']) and str(row['이미지']).strip() != "":
+                img_url = convert_google_drive_link(str(row['이미지']).strip())
+                st.image(img_url, use_container_width=True)
+
             st.markdown(f'<p class="answer-text">A. {row["정답"]}</p>', unsafe_allow_html=True)
             c1, c2, c3 = st.columns(3)
             with c1:
-                if st.button("어려움 (1)"):
+                if st.button("어려움 (1/Ctrl)"):
                     st.session_state.q_wrong_levels[q_idx] = st.session_state.q_wrong_levels.get(q_idx, 0) + 1; st.session_state.q_levels[q_idx] = 1; df.at[q_idx, '오답횟수'] += 1
-                    # gviz 방식은 쓰기 불가능하므로, 오답 기록은 세션에만 유지되거나 별도 처리가 필요함. 
-                    # *중요*: 현재 방식(공개 시트)에서는 시트에 '쓰기'가 안 됩니다. 
-                    # 공부하는 동안 세션(RAM)에는 기록되지만 새로고침하면 날아갑니다.
-                    # 만약 시트에 '저장'까지 하고 싶다면 반드시 서비스 계정 인증(secrets.toml 파일 교체)을 해야 합니다.
-                    # 일단 공부 흐름을 위해 세션 진행은 되도록 뒀습니다.
                     st.session_state.schedules.setdefault(st.session_state.solve_count + 5, []).append(q_idx); st.session_state.solve_count += 1; st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
             with c2:
-                if st.button("정상 (2)"):
+                if st.button("정상 (2/Alt)"):
                     new_lv = st.session_state.q_levels.get(q_idx, 0) + 1; df.at[q_idx, '정상횟수'] += 1
                     if new_lv > 7: df.at[q_idx, '정답횟수'] = 5; del st.session_state.q_levels[q_idx]
                     else: st.session_state.q_levels[q_idx] = new_lv; st.session_state.schedules.setdefault(st.session_state.solve_count + FIBO_GAP[new_lv], []).append(q_idx)
@@ -201,6 +217,16 @@ if df is not None and not df.empty:
         st.markdown(f'<div style="display:flex; justify-content:space-between; padding:5px; font-size:0.8rem;"><p>✅{m_q}</p><p>🔥{r_q}</p><p>🆕{n_q}</p></div>', unsafe_allow_html=True)
 else:
     st.error(f"⚠️ '{st.session_state.sheet_name}' 시트를 불러오지 못했습니다.")
-    st.info("1. requirements.txt에 openpyxl이 있는지 확인하세요.\n2. 구글 시트 공유가 '뷰어'로 되어 있는지 확인하세요.\n3. 시트 이름에 오타가 없는지 확인하세요.")
 
-components.html("""<script>const doc = window.parent.document;doc.addEventListener('keydown', function(e) {if (e.code === 'Space') { e.preventDefault(); const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('확인') || el.innerText.includes('시작')); if (btn) btn.click(); }else if (e.key === '1') { const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('어려움')); if (btn) btn.click(); }else if (e.key === '2') { const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('정상')); if (btn) btn.click(); }else if (e.key === '3') { const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('쉬움')); if (btn) btn.click(); }});</script>""", height=0)
+# 단축키 엔진 (Space, 1/Ctrl, 2/Alt, 3)
+components.html("""
+<script>
+    const doc = window.parent.document;
+    doc.addEventListener('keydown', function(e) {
+        if (e.code === 'Space') { e.preventDefault(); const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('확인') || el.innerText.includes('시작')); if (btn) btn.click(); }
+        else if (e.key === '1' || e.key === 'Control') { const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('어려움')); if (btn) btn.click(); }
+        else if (e.key === '2' || e.key === 'Alt') { e.preventDefault(); const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('정상')); if (btn) btn.click(); }
+        else if (e.key === '3') { const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('쉬움')); if (btn) btn.click(); }
+    });
+</script>
+""", height=0)
