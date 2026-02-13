@@ -18,10 +18,10 @@ if 'q_levels' not in st.session_state: st.session_state.q_levels = {}
 if 'q_wrong_levels' not in st.session_state: st.session_state.q_wrong_levels = {}
 if 'schedules' not in st.session_state: st.session_state.schedules = {} 
 if 'solve_count' not in st.session_state: st.session_state.solve_count = 0
-if 'last_msg' not in st.session_state: st.session_state.last_msg = "준비 완료"
+if 'last_msg' not in st.session_state: st.session_state.last_msg = "데이터 로드 준비 중..."
 if 'sheet_name' not in st.session_state: st.session_state.sheet_name = None
 
-# 3. 디자인 설정 (PC 2/3, 모바일 1/2)
+# 3. 디자인 설정 (PC 2/3, 모바일 1/2 유지)
 st.markdown("""
 <style>
     .stApp { background-color: black; color: white; }
@@ -49,7 +49,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 4. 데이터 로드 (GViz API)
+# 4. 데이터 로드 로직
 @st.cache_data(ttl=60)
 def get_sheet_id():
     try:
@@ -87,10 +87,8 @@ def load_data(sheet_name):
         df = pd.read_csv(csv_url)
         df.columns = [c.strip() for c in df.columns]
         
-        # 이미지 컬럼 없으면 생성
         if '이미지' not in df.columns: df['이미지'] = pd.NA
         
-        # 필요한 컬럼만 추출
         cols = ['질문', '정답', '정답횟수', '오답횟수', '어려움횟수', '정상횟수', '쉬움횟수', '이미지']
         df = df[[c for c in cols if c in df.columns]]
         
@@ -101,31 +99,15 @@ def load_data(sheet_name):
         return df
     except: return None
 
-# [사이드바] 시트 선택 (메인 화면 간섭 X)
+# [로직 변경] 시트 선택창 제거 -> 첫 번째 시트 자동 로드
 sheet_list = get_all_sheet_names()
-with st.sidebar:
-    st.header("📂 학습 시트 선택")
-    if sheet_list:
-        if st.session_state.sheet_name not in sheet_list:
-            st.session_state.sheet_name = sheet_list[0]
-        selected = st.radio("목록:", sheet_list, index=sheet_list.index(st.session_state.sheet_name))
-    else:
-        st.warning("목록 로드 실패 (수동 입력)")
-        selected = st.text_input("시트 이름:", value=st.session_state.sheet_name or "시트1")
-    
-    if selected != st.session_state.sheet_name:
-        st.session_state.sheet_name = selected
-        st.cache_data.clear()
-        st.session_state.df = load_data(selected)
-        st.session_state.current_index = None; st.session_state.state = "IDLE"; st.session_state.solve_count = 0
-        st.session_state.q_levels = {}; st.session_state.schedules = {}
-        st.session_state.last_msg = f"'{selected}' 변경 완료"
-        st.rerun()
 
 if 'df' not in st.session_state or st.session_state.df is None:
-    initial = st.session_state.sheet_name if st.session_state.sheet_name else (sheet_list[0] if sheet_list else "시트1")
-    st.session_state.sheet_name = initial
-    st.session_state.df = load_data(initial)
+    # 1순위: 세션에 저장된 값, 2순위: 시트 목록의 첫번째, 3순위: 기본값 "시트18"
+    if st.session_state.sheet_name is None:
+        st.session_state.sheet_name = sheet_list[0] if sheet_list else "시트18"
+    
+    st.session_state.df = load_data(st.session_state.sheet_name)
 
 df = st.session_state.df
 
@@ -144,13 +126,13 @@ def get_next_question(dataframe):
 
 # --- 6. 메인 화면 ---
 if df is not None and not df.empty:
-    # 상단: 동기화 & 오답노트
-    c1, c2, c3 = st.columns([6, 2, 2])
-    with c2:
-        if st.button("🔄 동기화"):
+    # 상단 버튼 (동기화 + 오답노트)
+    t_col1, t_col2, t_col3 = st.columns([6, 2, 2])
+    with t_col2:
+        if st.button("🔄 동기화", key="sync_btn"):
             st.cache_data.clear(); st.session_state.df = load_data(st.session_state.sheet_name); st.rerun()
-    with c3:
-        # [핵심] 오답노트 다운로드 버튼 복구
+    with t_col3:
+        # [확인 완료] 오답노트 다운로드 버튼
         if '어려움횟수' in df.columns:
             diff_df = df[df['어려움횟수'] > 0].sort_values(by='어려움횟수', ascending=False)
             if not diff_df.empty:
@@ -182,7 +164,7 @@ if df is not None and not df.empty:
                 img_url = convert_google_drive_link(str(row['이미지']).strip())
                 st.image(img_url, use_container_width=True)
             
-            st.markdown(f'<div style="text-align:center;"><span class="status-badge badge-new">🆕 신규</span></div>' if c_lv == 0 else f'<div style="text-align:center;"><span class="status-badge badge-review">🔥 Lv.{c_lv}</span></div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="text-align:center;"><span class="status-badge badge-new">🆕 신규 문항</span></div>' if c_lv == 0 else f'<div style="text-align:center;"><span class="status-badge badge-review">🔥 복습 Lv.{c_lv}</span></div>', unsafe_allow_html=True)
             w_bars = "█" * min(st.session_state.q_wrong_levels.get(st.session_state.current_index, 0), 15); w_empty = "░" * (15 - len(w_bars))
             c_bars = "█" * min(c_lv, 15); c_empty = "░" * (15 - len(c_bars))
             st.markdown(f'<div class="dual-gauge-container"><div class="gauge-row"><span class="wrong-side">{w_empty}{w_bars}</span><span class="center-line">|</span><span class="correct-side">{c_bars}{c_empty}</span></div></div>', unsafe_allow_html=True)
@@ -217,8 +199,8 @@ if df is not None and not df.empty:
         st.markdown(f'<div style="display:flex; justify-content:space-between; padding:5px; font-size:0.8rem;"><p>✅{m_q}</p><p>🔥{r_q}</p><p>🆕{n_q}</p></div>', unsafe_allow_html=True)
 else:
     st.error(f"⚠️ '{st.session_state.sheet_name}' 시트를 불러오지 못했습니다.")
+    st.info("1. requirements.txt에 openpyxl이 있는지 확인하세요.\n2. 구글 시트 공유가 '뷰어'로 되어 있는지 확인하세요.")
 
-# 단축키 엔진 (Space, 1/Ctrl, 2/Alt, 3)
 components.html("""
 <script>
     const doc = window.parent.document;
