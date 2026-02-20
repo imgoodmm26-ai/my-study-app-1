@@ -17,7 +17,7 @@ if 'schedules' not in st.session_state: st.session_state.schedules = {}
 if 'solve_count' not in st.session_state: st.session_state.solve_count = 0
 if 'last_msg' not in st.session_state: st.session_state.last_msg = "데이터 동기화 완료."
 
-# 3. 디자인 설정 (기존 유지)
+# 3. 디자인 설정
 st.markdown("""
 <style>
     .stApp { background-color: black; color: white; }
@@ -39,7 +39,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 4. 데이터 로드 (에러 메시지 강화)
+# 4. 데이터 로드
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_data():
@@ -51,10 +51,7 @@ def load_data():
         url = st.secrets["gsheets_url"].strip()
         df_raw = conn.read(spreadsheet=url, worksheet=0)
         
-        # 열 개수 및 이름 자동 조정
         required_cols = ['질문', '정답', '정답횟수', '오답횟수', '어려움횟수', '정상횟수', '쉬움횟수']
-        
-        # 시트에 열이 부족하면 생성
         for col in required_cols:
             if col not in df_raw.columns:
                 df_raw[col] = 0
@@ -74,7 +71,7 @@ if 'df' not in st.session_state or st.session_state.df is None:
 
 df = st.session_state.df
 
-# 5. 출제 로직 (기존 유지)
+# 5. 출제 로직
 def get_next_question(dataframe):
     curr_cnt = st.session_state.solve_count
     all_scheduled = [idx for sublist in st.session_state.schedules.values() for idx in sublist]
@@ -92,7 +89,6 @@ def get_next_question(dataframe):
 
 # --- 6. 메인 화면 ---
 if df is not None:
-    # (중략: 기존 UI 로직 동일)
     t_col1, t_col2, t_col3 = st.columns([5, 2.5, 2.5])
     with t_col2:
         if st.button("🔄 동기화", key="sync_btn"):
@@ -104,7 +100,6 @@ if df is not None:
             st.download_button(label="📥 오답노트", data=csv_data, file_name='wrong_notes.csv')
         else: st.button("📥 오답 없음", disabled=True)
 
-    # 문제 번호 관리 수정
     if st.session_state.current_index is not None and isinstance(st.session_state.current_index, int):
         if st.session_state.current_index >= len(df):
             st.session_state.current_index = get_next_question(df)
@@ -164,7 +159,6 @@ if df is not None:
                     st.session_state.q_levels.pop(q_idx, None)
                     st.session_state.solve_count += 1; st.session_state.current_index = get_next_question(df); st.session_state.state = "QUESTION"; st.rerun()
 
-        # 하단 프로그레스 바
         tot = len(df); m_q = len(df[df['정답횟수'] >= 5]); r_q = len(st.session_state.q_levels); n_q = tot - m_q - r_q
         st.markdown(f'<div class="progress-container"><div class="bar-mastered" style="width:{(m_q/tot)*100}%"></div><div class="bar-review" style="width:{(r_q/tot)*100}%"></div><div class="bar-new" style="width:{(n_q/tot)*100}%"></div></div>', unsafe_allow_html=True)
         st.markdown(f'<div style="display:flex; justify-content:space-between; padding:5px; font-size:0.8rem;"><p>✅{m_q}</p><p>🔥{r_q}</p><p>🆕{n_q}</p></div>', unsafe_allow_html=True)
@@ -172,5 +166,46 @@ if df is not None:
 else:
     st.warning("☝️ 시트 데이터를 불러오지 못했습니다. Secrets 설정과 시트 권한을 확인해 주세요.")
 
-# 7. 단축키 엔진 (기존 유지)
-components.html("""<script>const doc = window.parent.document;doc.addEventListener('keydown', function(e) {if (e.code === 'Space') { e.preventDefault(); const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('확인') || el.innerText.includes('시작')); if (btn) btn.click(); }else if (e.key === '1') { const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('어려움')); if (btn) btn.click(); }else if (e.key === '2') { const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('정상')); if (btn) btn.click(); }else if (e.key === '3') { const btn = Array.from(doc.querySelectorAll('button')).find(el => el.innerText.includes('쉬움')); if (btn) btn.click(); }});</script>""", height=0)
+# 7. 단축키 엔진 (Ctrl, Alt 연동 강화)
+components.html("""
+<script>
+const doc = window.parent.document;
+
+doc.addEventListener('keydown', function(e) {
+    // 1. Space Bar: 시작하기 / 정답 확인
+    if (e.code === 'Space') {
+        e.preventDefault();
+        const btn = Array.from(doc.querySelectorAll('button')).find(el => 
+            el.innerText.includes('확인') || el.innerText.includes('시작')
+        );
+        if (btn) btn.click();
+    }
+    
+    // 2. Control 키 또는 숫자 1: 어려움
+    else if (e.key === 'Control' || e.key === '1') {
+        if (e.key === 'Control') e.preventDefault(); 
+        const btn = Array.from(doc.querySelectorAll('button')).find(el => 
+            el.innerText.includes('어려움')
+        );
+        if (btn) btn.click();
+    }
+    
+    // 3. Alt 키 또는 숫자 2: 정상
+    else if (e.key === 'Alt' || e.key === '2') {
+        e.preventDefault(); 
+        const btn = Array.from(doc.querySelectorAll('button')).find(el => 
+            el.innerText.includes('정상')
+        );
+        if (btn) btn.click();
+    }
+    
+    // 4. 숫자 3: 쉬움
+    else if (e.key === '3') {
+        const btn = Array.from(doc.querySelectorAll('button')).find(el => 
+            el.innerText.includes('쉬움')
+        );
+        if (btn) btn.click();
+    }
+}, true);
+</script>
+""", height=0)
